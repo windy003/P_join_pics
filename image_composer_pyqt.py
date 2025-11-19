@@ -2,11 +2,65 @@ import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphicsScene,
                              QGraphicsPixmapItem, QFileDialog, QMessageBox, QToolBar,
                              QAction, QStatusBar, QGraphicsItem, QSizePolicy, QPushButton,
-                             QWidget, QHBoxLayout)
-from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence
+                             QWidget, QHBoxLayout, QSystemTrayIcon, QMenu, QDialog,
+                             QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox, QStyle)
+from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject
+from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon
 from PIL import Image
 import os
+
+try:
+    import keyboard
+    KEYBOARD_AVAILABLE = True
+except ImportError:
+    KEYBOARD_AVAILABLE = False
+
+
+class HotkeySignalEmitter(QObject):
+    """用于从keyboard库线程发送信号到Qt主线程的信号发射器"""
+    show_signal = pyqtSignal()
+
+
+class HotkeySettingsDialog(QDialog):
+    """快捷键设置对话框"""
+    def __init__(self, current_hotkey, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("快捷键设置")
+        self.setModal(True)
+
+        layout = QVBoxLayout()
+
+        # 说明文字
+        info_label = QLabel("设置全局快捷键来唤出窗口")
+        layout.addWidget(info_label)
+
+        # 快捷键输入框
+        self.hotkey_edit = QLineEdit()
+        self.hotkey_edit.setText(current_hotkey)
+        self.hotkey_edit.setPlaceholderText("例如: ctrl+win+z")
+        layout.addWidget(QLabel("快捷键 (使用+连接，如ctrl+shift+a):"))
+        layout.addWidget(self.hotkey_edit)
+
+        # 提示
+        tip_label = QLabel("支持的修饰键: ctrl, shift, alt, win\n支持的按键: a-z, 0-9, f1-f12等")
+        tip_label.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(tip_label)
+
+        if not KEYBOARD_AVAILABLE:
+            warning_label = QLabel("⚠️ 需要安装keyboard库才能使用全局快捷键\n运行: pip install keyboard")
+            warning_label.setStyleSheet("color: red;")
+            layout.addWidget(warning_label)
+
+        # 按钮
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.setLayout(layout)
+
+    def get_hotkey(self):
+        return self.hotkey_edit.text().strip()
 
 
 class DraggablePixmapItem(QGraphicsPixmapItem):
@@ -46,7 +100,16 @@ class DraggablePixmapItem(QGraphicsPixmapItem):
 class ImageComposer(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.settings = QSettings("ImageComposer", "Settings")
+        self.hotkey = self.settings.value("hotkey", "ctrl+win+z")
+
+        # 创建信号发射器用于线程安全的窗口显示
+        self.hotkey_emitter = HotkeySignalEmitter()
+        self.hotkey_emitter.show_signal.connect(self.show_window)
+
         self.init_ui()
+        self.create_system_tray()
+        self.setup_global_hotkey()
 
     def init_ui(self):
         """初始化用户界面"""
@@ -78,6 +141,112 @@ class ImageComposer(QMainWindow):
 
         # 工具栏可见状态
         self.toolbars_visible = True
+
+        # 默认隐藏工具栏
+        self.toggle_toolbars()
+
+    def create_system_tray(self):
+        """创建系统托盘图标"""
+        # 创建托盘图标
+        self.tray_icon = QSystemTrayIcon(self)
+
+        # 尝试加载自定义图标
+        icon_path = os.path.join(os.path.dirname(__file__), "2048x2048.png")
+        if os.path.exists(icon_path):
+            icon = QIcon(icon_path)
+        else:
+            # 如果文件不存在，使用系统默认图标
+            icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
+
+        self.tray_icon.setIcon(icon)
+
+        # 创建托盘菜单
+        tray_menu = QMenu()
+
+        # 显示/隐藏窗口
+        show_action = QAction("显示窗口", self)
+        show_action.triggered.connect(self.show_window)
+        tray_menu.addAction(show_action)
+
+        hide_action = QAction("隐藏窗口", self)
+        hide_action.triggered.connect(self.hide)
+        tray_menu.addAction(hide_action)
+
+        tray_menu.addSeparator()
+
+        # 快捷键设置
+        hotkey_action = QAction("设置快捷键...", self)
+        hotkey_action.triggered.connect(self.open_hotkey_settings)
+        tray_menu.addAction(hotkey_action)
+
+        tray_menu.addSeparator()
+
+        # 退出程序
+        quit_action = QAction("退出程序 (&X)", self)
+        quit_action.triggered.connect(self.quit_application)
+        tray_menu.addAction(quit_action)
+
+        self.tray_icon.setContextMenu(tray_menu)
+
+        # 双击托盘图标显示窗口
+        self.tray_icon.activated.connect(self.tray_icon_activated)
+
+        # 显示托盘图标
+        self.tray_icon.show()
+        self.tray_icon.setToolTip("图片合成器")
+
+    def tray_icon_activated(self, reason):
+        """托盘图标被激活时的处理"""
+        if reason == QSystemTrayIcon.DoubleClick:
+            self.show_window()
+
+    def show_window(self):
+        """显示窗口"""
+        self.show()
+        self.activateWindow()
+        self.raise_()
+
+    def setup_global_hotkey(self):
+        """设置全局快捷键"""
+        if not KEYBOARD_AVAILABLE:
+            return
+
+        try:
+            # 移除旧的快捷键
+            keyboard.unhook_all()
+            # 注册新的快捷键 - 使用信号发射器确保线程安全
+            keyboard.add_hotkey(self.hotkey, lambda: self.hotkey_emitter.show_signal.emit())
+        except Exception as e:
+            print(f"设置全局快捷键失败: {e}")
+
+    def open_hotkey_settings(self):
+        """打开快捷键设置对话框"""
+        dialog = HotkeySettingsDialog(self.hotkey, self)
+        if dialog.exec_() == QDialog.Accepted:
+            new_hotkey = dialog.get_hotkey()
+            if new_hotkey:
+                self.hotkey = new_hotkey
+                self.settings.setValue("hotkey", self.hotkey)
+                self.setup_global_hotkey()
+                QMessageBox.information(self, "成功", f"快捷键已设置为: {self.hotkey}")
+
+    def closeEvent(self, event):
+        """关闭窗口事件 - 最小化到托盘而不是退出"""
+        event.ignore()
+        self.hide()
+        self.tray_icon.showMessage(
+            "图片合成器",
+            "程序已最小化到系统托盘\n双击托盘图标或使用快捷键可重新打开",
+            QSystemTrayIcon.Information,
+            2000
+        )
+
+    def quit_application(self):
+        """真正退出程序"""
+        if KEYBOARD_AVAILABLE:
+            keyboard.unhook_all()
+        self.tray_icon.hide()
+        QApplication.quit()
 
     def create_toolbar(self):
         """创建工具栏（分两行显示）"""
