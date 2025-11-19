@@ -1,8 +1,9 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphicsScene,
                              QGraphicsPixmapItem, QFileDialog, QMessageBox, QToolBar,
-                             QAction, QStatusBar, QGraphicsItem, QSizePolicy)
-from PyQt5.QtCore import Qt, QPointF, QRectF, QSize
+                             QAction, QStatusBar, QGraphicsItem, QSizePolicy, QPushButton,
+                             QWidget, QHBoxLayout)
+from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence
 from PIL import Image
 import os
@@ -75,29 +76,54 @@ class ImageComposer(QMainWindow):
         # 图片计数
         self.image_count = 0
 
+        # 工具栏可见状态
+        self.toolbars_visible = True
+
     def create_toolbar(self):
         """创建工具栏（分两行显示）"""
         # 第一行工具栏：文件操作
-        toolbar1 = QToolBar("文件操作")
-        toolbar1.setMovable(False)
-        toolbar1.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        toolbar1.setIconSize(QSize(16, 16))
-        toolbar1.setFloatable(False)
-        self.addToolBar(toolbar1)
+        self.toolbar1 = QToolBar("文件操作")
+        self.toolbar1.setMovable(False)
+        self.toolbar1.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.toolbar1.setIconSize(QSize(16, 16))
+        self.toolbar1.setFloatable(False)
+        self.addToolBar(self.toolbar1)
+
+        # 添加折叠/展开按钮到工具栏最左侧
+        self.toggle_btn = QPushButton("◀")
+        self.toggle_btn.setFixedSize(20, 20)
+        self.toggle_btn.setToolTip("隐藏/展开工具栏")
+        self.toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e0e0e0;
+                border: 1px solid #999;
+                border-radius: 3px;
+                font-size: 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #d0d0d0;
+            }
+            QPushButton:pressed {
+                background-color: #c0c0c0;
+            }
+        """)
+        self.toggle_btn.clicked.connect(self.toggle_toolbars)
+        self.toolbar1.insertWidget(self.toolbar1.actions()[0] if self.toolbar1.actions() else None, self.toggle_btn)
 
         # 导入图片
         import_action = QAction("📁 导入 (Ctrl+O)", self)
         import_action.setShortcut(QKeySequence("Ctrl+O"))
         import_action.setToolTip("导入图片 (Ctrl+O)")
         import_action.triggered.connect(self.import_images)
-        toolbar1.addAction(import_action)
+        self.toolbar1.addAction(import_action)
 
         # 导出图片 - 添加Ctrl+E快捷键
         export_action = QAction("💾 导出 (Ctrl+E)", self)
         export_action.setShortcut(QKeySequence("Ctrl+E"))
         export_action.setToolTip("导出图片 (Ctrl+E 或 Ctrl+S)")
         export_action.triggered.connect(self.export_image)
-        toolbar1.addAction(export_action)
+        self.toolbar1.addAction(export_action)
 
         # 额外绑定Ctrl+S快捷键（保持兼容性）
         export_action2 = QAction(self)
@@ -105,67 +131,98 @@ class ImageComposer(QMainWindow):
         export_action2.triggered.connect(self.export_image)
         self.addAction(export_action2)
 
-        toolbar1.addSeparator()
+        self.toolbar1.addSeparator()
 
         # 删除选中
         delete_action = QAction("🗑️ 删除 (Del)", self)
         delete_action.setShortcut(QKeySequence("Delete"))
         delete_action.setToolTip("删除选中的图片 (Delete)")
         delete_action.triggered.connect(self.delete_selected)
-        toolbar1.addAction(delete_action)
+        self.toolbar1.addAction(delete_action)
 
         # 清空画布
         clear_action = QAction("🗑️ 清空", self)
         clear_action.setToolTip("清空画布上的所有图片")
         clear_action.triggered.connect(self.clear_canvas)
-        toolbar1.addAction(clear_action)
+        self.toolbar1.addAction(clear_action)
 
         # 强制换行，开始第二行工具栏
         self.addToolBarBreak()
 
         # 第二行工具栏：编辑和视图操作
-        toolbar2 = QToolBar("编辑操作")
-        toolbar2.setMovable(False)
-        toolbar2.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        toolbar2.setIconSize(QSize(16, 16))
-        toolbar2.setFloatable(False)
-        self.addToolBar(toolbar2)
+        self.toolbar2 = QToolBar("编辑操作")
+        self.toolbar2.setMovable(False)
+        self.toolbar2.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.toolbar2.setIconSize(QSize(16, 16))
+        self.toolbar2.setFloatable(False)
+        self.addToolBar(self.toolbar2)
 
         # 放大图片
         zoom_in_action = QAction("🔍+ 放大 (Ctrl+=)", self)
         zoom_in_action.setShortcut(QKeySequence("Ctrl+="))
         zoom_in_action.setToolTip("放大选中的图片 (Ctrl+=)")
         zoom_in_action.triggered.connect(self.zoom_in_selected)
-        toolbar2.addAction(zoom_in_action)
+        self.toolbar2.addAction(zoom_in_action)
 
         # 缩小图片
         zoom_out_action = QAction("🔍- 缩小 (Ctrl+-)", self)
         zoom_out_action.setShortcut(QKeySequence("Ctrl+-"))
         zoom_out_action.setToolTip("缩小选中的图片 (Ctrl+-)")
         zoom_out_action.triggered.connect(self.zoom_out_selected)
-        toolbar2.addAction(zoom_out_action)
+        self.toolbar2.addAction(zoom_out_action)
 
         # 重置大小
         reset_size_action = QAction("↺ 重置 (Ctrl+0)", self)
         reset_size_action.setShortcut(QKeySequence("Ctrl+0"))
         reset_size_action.setToolTip("重置选中图片的大小 (Ctrl+0)")
         reset_size_action.triggered.connect(self.reset_selected_size)
-        toolbar2.addAction(reset_size_action)
+        self.toolbar2.addAction(reset_size_action)
 
-        toolbar2.addSeparator()
+        self.toolbar2.addSeparator()
 
         # 适应窗口
         fit_action = QAction("🖼️ 适应窗口 (Ctrl+P)", self)
         fit_action.setShortcut(QKeySequence("Ctrl+P"))
         fit_action.setToolTip("调整视图以显示所有图片 (Ctrl+P)")
         fit_action.triggered.connect(self.fit_in_view)
-        toolbar2.addAction(fit_action)
+        self.toolbar2.addAction(fit_action)
 
         # 重置视图
         reset_action = QAction("🔄 重置视图", self)
         reset_action.setToolTip("重置视图缩放和位置")
         reset_action.triggered.connect(self.reset_view)
-        toolbar2.addAction(reset_action)
+        self.toolbar2.addAction(reset_action)
+
+    def toggle_toolbars(self):
+        """切换工具栏的显示/隐藏状态"""
+        self.toolbars_visible = not self.toolbars_visible
+
+        if self.toolbars_visible:
+            # 展开工具栏
+            self.toolbar1.show()
+            self.toolbar2.show()
+            self.toggle_btn.setText("◀")
+            self.toggle_btn.setToolTip("隐藏工具栏")
+        else:
+            # 隐藏工具栏中除了切换按钮外的所有内容
+            for action in self.toolbar1.actions():
+                widget = self.toolbar1.widgetForAction(action)
+                if widget != self.toggle_btn:
+                    action.setVisible(False)
+
+            for action in self.toolbar2.actions():
+                action.setVisible(False)
+
+            self.toolbar2.hide()
+            self.toggle_btn.setText("▶")
+            self.toggle_btn.setToolTip("展开工具栏")
+
+        # 如果隐藏状态，需要重新显示所有action
+        if self.toolbars_visible:
+            for action in self.toolbar1.actions():
+                action.setVisible(True)
+            for action in self.toolbar2.actions():
+                action.setVisible(True)
 
     def import_images(self):
         """导入多张图片"""
