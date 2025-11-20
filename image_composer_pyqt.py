@@ -8,6 +8,7 @@ from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtPro
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon
 from PIL import Image
 import os
+from datetime import datetime
 
 try:
     import keyboard
@@ -560,25 +561,27 @@ class ImageComposer(QMainWindow):
         self.view.centerOn(0, 0)
 
     def export_image(self):
-        """导出合成后的图片（使用原始分辨率）"""
+        """导出合成后的图片（自动保存到指定路径）"""
         items = [item for item in self.scene.items() if isinstance(item, DraggablePixmapItem)]
 
         if not items:
-            QMessageBox.warning(self, "警告", "画布上没有图片可导出！")
-            return
-
-        # 让用户选择保存位置
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "保存图片",
-            "",
-            "PNG图片 (*.png);;JPEG图片 (*.jpg);;所有文件 (*.*)"
-        )
-
-        if not file_path:
+            # 播放错误提示音
+            QApplication.beep()
+            self.status_bar.showMessage("画布上没有图片可导出！")
             return
 
         try:
+            # 获取用户OneDrive图片目录
+            user_home = os.path.expanduser("~")
+            save_dir = os.path.join(user_home, "OneDrive", "图片", "Screenshots")
+
+            # 如果目录不存在，创建它
+            os.makedirs(save_dir, exist_ok=True)
+
+            # 生成时间戳文件名
+            timestamp = datetime.now().strftime("%Y-%m-%d %H %M %S")
+            file_path = os.path.join(save_dir, f"{timestamp}.png")
+
             # 计算所有图片的边界框（使用原始尺寸）
             min_x = float('inf')
             min_y = float('inf')
@@ -621,11 +624,8 @@ class ImageComposer(QMainWindow):
             width = int(max_x - min_x + 2 * padding)
             height = int(max_y - min_y + 2 * padding)
 
-            # 创建结果图片（使用原始分辨率）
-            if file_path.lower().endswith('.jpg') or file_path.lower().endswith('.jpeg'):
-                result = Image.new('RGB', (width, height), 'white')
-            else:
-                result = Image.new('RGBA', (width, height), (255, 255, 255, 255))
+            # 创建结果图片（PNG格式，支持透明）
+            result = Image.new('RGBA', (width, height), (255, 255, 255, 255))
 
             # 粘贴所有原始图片
             for info in image_info:
@@ -647,20 +647,18 @@ class ImageComposer(QMainWindow):
                         result.paste(img, (paste_x, paste_y))
 
             # 保存结果
-            if file_path.lower().endswith('.jpg') or file_path.lower().endswith('.jpeg'):
-                result.save(file_path, 'JPEG', quality=95)
-            else:
-                result.save(file_path, 'PNG')
+            result.save(file_path, 'PNG')
 
-            QMessageBox.information(
-                self,
-                "成功",
-                f"图片已成功保存到:\n{file_path}\n\n尺寸: {width} x {height} 像素"
-            )
-            self.status_bar.showMessage(f"图片已导出: {os.path.basename(file_path)} ({width}x{height})")
+            # 播放成功提示音
+            QApplication.beep()
+
+            # 更新状态栏，显示完整路径
+            self.status_bar.showMessage(f"已保存到: {file_path} ({width}x{height})")
 
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"导出图片失败:\n{str(e)}")
+            # 播放错误提示音
+            QApplication.beep()
+            self.status_bar.showMessage(f"导出失败: {str(e)}")
 
     def keyPressEvent(self, event):
         """键盘事件处理"""
