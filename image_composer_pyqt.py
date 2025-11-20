@@ -3,9 +3,10 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphics
                              QGraphicsPixmapItem, QFileDialog, QMessageBox, QToolBar,
                              QAction, QStatusBar, QGraphicsItem, QSizePolicy, QPushButton,
                              QWidget, QHBoxLayout, QSystemTrayIcon, QMenu, QDialog,
-                             QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox, QStyle)
-from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon
+                             QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox, QStyle,
+                             QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsItemGroup)
+from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject, QLineF
+from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon, QPen, QColor, QPolygonF, QBrush
 from PIL import Image
 import os
 from datetime import datetime
@@ -64,6 +65,71 @@ class HotkeySettingsDialog(QDialog):
         return self.hotkey_edit.text().strip()
 
 
+class ArrowItem(QGraphicsItemGroup):
+    """可拖拽的箭头"""
+    def __init__(self, start_point, end_point):
+        super().__init__()
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+
+        self.start_point = start_point
+        self.end_point = end_point
+
+        # 箭头样式
+        self.pen = QPen(QColor(255, 0, 0), 3, Qt.SolidLine)
+        self.arrow_size = 15
+
+        # 创建箭头的线条和箭头头部
+        self.line = QGraphicsLineItem()
+        self.arrow_head = QGraphicsPolygonItem()
+
+        self.addToGroup(self.line)
+        self.addToGroup(self.arrow_head)
+
+        self.update_arrow()
+
+        self.setCursor(Qt.OpenHandCursor)
+
+    def update_arrow(self):
+        """更新箭头的位置和形状"""
+        # 设置线条
+        line = QLineF(self.start_point, self.end_point)
+        self.line.setLine(line)
+        self.line.setPen(self.pen)
+
+        # 计算箭头头部
+        angle = line.angle() * 3.14159 / 180.0
+        arrow_p1 = self.end_point - QPointF(
+            self.arrow_size * (line.dx() / line.length() + 0.5 * line.dy() / line.length()),
+            self.arrow_size * (line.dy() / line.length() - 0.5 * line.dx() / line.length())
+        )
+        arrow_p2 = self.end_point - QPointF(
+            self.arrow_size * (line.dx() / line.length() - 0.5 * line.dy() / line.length()),
+            self.arrow_size * (line.dy() / line.length() + 0.5 * line.dx() / line.length())
+        )
+
+        arrow_head_polygon = QPolygonF([self.end_point, arrow_p1, arrow_p2])
+        self.arrow_head.setPolygon(arrow_head_polygon)
+        self.arrow_head.setPen(self.pen)
+        self.arrow_head.setBrush(QBrush(self.pen.color()))
+
+    def mousePressEvent(self, event):
+        self.setCursor(Qt.ClosedHandCursor)
+        # 选中时自动置顶
+        if self.scene():
+            max_z = 0
+            for item in self.scene().items():
+                if isinstance(item, (DraggablePixmapItem, ArrowItem)):
+                    max_z = max(max_z, item.zValue())
+            self.setZValue(max_z + 1)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.setCursor(Qt.OpenHandCursor)
+        super().mouseReleaseEvent(event)
+
+
 class DraggablePixmapItem(QGraphicsPixmapItem):
     """可拖拽的图片项"""
     def __init__(self, pixmap, original_image, display_scale=1.0):
@@ -91,11 +157,71 @@ class DraggablePixmapItem(QGraphicsPixmapItem):
 
     def mousePressEvent(self, event):
         self.setCursor(Qt.ClosedHandCursor)
+        # 选中时自动置顶：找到场景中所有图片的最大Z值，然后设置为比它更大
+        if self.scene():
+            max_z = 0
+            for item in self.scene().items():
+                if isinstance(item, DraggablePixmapItem):
+                    max_z = max(max_z, item.zValue())
+            self.setZValue(max_z + 1)
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
         self.setCursor(Qt.OpenHandCursor)
         super().mouseReleaseEvent(event)
+
+
+class CustomGraphicsView(QGraphicsView):
+    """自定义图形视图，支持箭头绘制"""
+    def __init__(self, scene, parent=None):
+        super().__init__(scene, parent)
+        self.main_window = None
+
+    def mousePressEvent(self, event):
+        if self.main_window and self.main_window.arrow_mode and event.button() == Qt.LeftButton:
+            # 箭头绘制模式
+            scene_pos = self.mapToScene(event.pos())
+            self.main_window.arrow_start_point = scene_pos
+
+            # 创建临时线条用于预览
+            pen = QPen(QColor(255, 0, 0, 150), 3, Qt.DashLine)
+            self.main_window.temp_arrow_line = self.scene().addLine(
+                scene_pos.x(), scene_pos.y(), scene_pos.x(), scene_pos.y(), pen
+            )
+            event.accept()  # 标记事件已处理
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.main_window and self.main_window.arrow_mode and self.main_window.arrow_start_point:
+            # 更新临时线条
+            scene_pos = self.mapToScene(event.pos())
+            if self.main_window.temp_arrow_line:
+                line = QLineF(self.main_window.arrow_start_point, scene_pos)
+                self.main_window.temp_arrow_line.setLine(line)
+            event.accept()  # 标记事件已处理
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self.main_window and self.main_window.arrow_mode and event.button() == Qt.LeftButton:
+            if self.main_window.arrow_start_point:
+                scene_pos = self.mapToScene(event.pos())
+
+                # 移除临时线条
+                if self.main_window.temp_arrow_line:
+                    self.scene().removeItem(self.main_window.temp_arrow_line)
+                    self.main_window.temp_arrow_line = None
+
+                # 创建箭头（只有当起点和终点不同时）
+                if (self.main_window.arrow_start_point - scene_pos).manhattanLength() > 10:
+                    arrow = ArrowItem(self.main_window.arrow_start_point, scene_pos)
+                    self.scene().addItem(arrow)
+
+                self.main_window.arrow_start_point = None
+            event.accept()  # 标记事件已处理
+        else:
+            super().mouseReleaseEvent(event)
 
 
 class ImageComposer(QMainWindow):
@@ -121,7 +247,8 @@ class ImageComposer(QMainWindow):
         self.scene = QGraphicsScene()
         self.scene.setSceneRect(0, 0, 3000, 3000)  # 设置更大的场景
 
-        self.view = QGraphicsView(self.scene)
+        self.view = CustomGraphicsView(self.scene)
+        self.view.main_window = self  # 设置对主窗口的引用
         self.view.setRenderHint(QPainter.Antialiasing)
         self.view.setRenderHint(QPainter.SmoothPixmapTransform)
         self.view.setDragMode(QGraphicsView.ScrollHandDrag)
@@ -132,13 +259,18 @@ class ImageComposer(QMainWindow):
         # 工具栏可见状态（默认隐藏）
         self.toolbars_visible = False
 
+        # 箭头绘制模式
+        self.arrow_mode = False
+        self.arrow_start_point = None
+        self.temp_arrow_line = None
+
         # 创建工具栏
         self.create_toolbar()
 
         # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空")
+        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头")
 
         # 图片计数
         self.image_count = 0
@@ -329,6 +461,17 @@ class ImageComposer(QMainWindow):
         self.toolbar2.setFloatable(False)
         self.addToolBar(self.toolbar2)
 
+        # 画箭头模式
+        self.arrow_action = QAction("➡️ 画箭头 (Ctrl+A)", self)
+        self.arrow_action.setShortcut(QKeySequence("Ctrl+A"))
+        self.arrow_action.setToolTip("开启/关闭箭头绘制模式 (Ctrl+A)")
+        self.arrow_action.setCheckable(True)
+        self.arrow_action.triggered.connect(self.toggle_arrow_mode)
+        self.toolbar2.addAction(self.arrow_action)
+        self.addAction(self.arrow_action)
+
+        self.toolbar2.addSeparator()
+
         # 放大图片
         zoom_in_action = QAction("🔍+ 放大 (Ctrl+=)", self)
         zoom_in_action.setShortcut(QKeySequence("Ctrl+="))
@@ -481,19 +624,53 @@ class ImageComposer(QMainWindow):
         # 转换为QPixmap
         return QPixmap.fromImage(qimage)
 
+    def toggle_arrow_mode(self):
+        """切换箭头绘制模式"""
+        self.arrow_mode = self.arrow_action.isChecked()
+
+        if self.arrow_mode:
+            # 进入箭头模式
+            self.view.setDragMode(QGraphicsView.NoDrag)
+            self.view.viewport().setCursor(Qt.CrossCursor)
+            self.status_bar.showMessage("箭头绘制模式：按住鼠标左键拖动绘制箭头 | 再次按 Ctrl+A 退出")
+        else:
+            # 退出箭头模式
+            self.view.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.view.viewport().setCursor(Qt.ArrowCursor)
+            self.status_bar.showMessage("已退出箭头绘制模式")
+
+            # 清理未完成的临时线条
+            if self.temp_arrow_line:
+                self.scene.removeItem(self.temp_arrow_line)
+                self.temp_arrow_line = None
+            self.arrow_start_point = None
+
     def delete_selected(self):
-        """删除选中的图片"""
+        """删除选中的图片或箭头"""
         selected_items = self.scene.selectedItems()
 
         if not selected_items:
-            self.status_bar.showMessage("没有选中的图片")
+            self.status_bar.showMessage("没有选中的项目")
             return
 
-        for item in selected_items:
-            self.scene.removeItem(item)
-            self.image_count -= 1
+        image_count = 0
+        arrow_count = 0
 
-        self.status_bar.showMessage(f"已删除 {len(selected_items)} 张图片")
+        for item in selected_items:
+            if isinstance(item, DraggablePixmapItem):
+                image_count += 1
+                self.image_count -= 1
+            elif isinstance(item, ArrowItem):
+                arrow_count += 1
+            self.scene.removeItem(item)
+
+        msg = []
+        if image_count > 0:
+            msg.append(f"{image_count} 张图片")
+        if arrow_count > 0:
+            msg.append(f"{arrow_count} 个箭头")
+
+        self.status_bar.showMessage(f"已删除 {' 和 '.join(msg)}" if msg else "已删除项目")
 
     def zoom_in_selected(self):
         """放大选中的图片"""
@@ -555,12 +732,15 @@ class ImageComposer(QMainWindow):
 
     def export_image(self):
         """导出合成后的图片（自动保存到指定路径）"""
-        items = [item for item in self.scene.items() if isinstance(item, DraggablePixmapItem)]
+        all_items = self.scene.items()
 
-        if not items:
+        # 检查是否有图片或箭头
+        has_content = any(isinstance(item, (DraggablePixmapItem, ArrowItem)) for item in all_items)
+
+        if not has_content:
             # 播放错误提示音
             QApplication.beep()
-            self.status_bar.showMessage("画布上没有图片可导出！")
+            self.status_bar.showMessage("画布上没有内容可导出！")
             return
 
         try:
@@ -575,77 +755,34 @@ class ImageComposer(QMainWindow):
             timestamp = datetime.now().strftime("%Y-%m-%d %H %M %S")
             file_path = os.path.join(save_dir, f"{timestamp}.png")
 
-            # 计算所有图片的边界框（使用原始尺寸）
-            min_x = float('inf')
-            min_y = float('inf')
-            max_x = float('-inf')
-            max_y = float('-inf')
-
-            # 收集所有图片的信息
-            image_info = []
-            for item in items:
-                pos = item.pos()
-
-                # 获取原始图片
-                orig_img = item.original_image.copy()
-
-                # 应用用户的缩放
-                if item.user_scale != 1.0:
-                    new_width = int(orig_img.width * item.user_scale)
-                    new_height = int(orig_img.height * item.user_scale)
-                    orig_img = orig_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-                # 位置就是画布上的位置（因为display_scale=1.0）
-                orig_x = pos.x()
-                orig_y = pos.y()
-
-                image_info.append({
-                    'image': orig_img,
-                    'x': orig_x,
-                    'y': orig_y,
-                    'width': orig_img.width,
-                    'height': orig_img.height
-                })
-
-                min_x = min(min_x, orig_x)
-                min_y = min(min_y, orig_y)
-                max_x = max(max_x, orig_x + orig_img.width)
-                max_y = max(max_y, orig_y + orig_img.height)
+            # 获取场景中所有项目的边界框
+            scene_rect = self.scene.itemsBoundingRect()
 
             # 添加边距
             padding = 50
-            width = int(max_x - min_x + 2 * padding)
-            height = int(max_y - min_y + 2 * padding)
+            scene_rect.adjust(-padding, -padding, padding, padding)
 
-            # 创建结果图片（PNG格式，支持透明）
-            result = Image.new('RGBA', (width, height), (255, 255, 255, 255))
+            # 创建QImage用于渲染
+            image = QImage(int(scene_rect.width()), int(scene_rect.height()),
+                          QImage.Format_ARGB32)
+            image.fill(Qt.white)
 
-            # 粘贴所有原始图片
-            for info in image_info:
-                paste_x = int(info['x'] - min_x + padding)
-                paste_y = int(info['y'] - min_y + padding)
+            # 创建QPainter并渲染场景
+            painter = QPainter(image)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            self.scene.render(painter, QRectF(), scene_rect)
+            painter.end()
 
-                img = info['image']
-
-                # 处理透明图片
-                if img.mode == 'RGBA' and result.mode == 'RGBA':
-                    result.paste(img, (paste_x, paste_y), img)
-                else:
-                    if img.mode == 'RGBA':
-                        # 如果结果是RGB，需要先将RGBA转换
-                        rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-                        rgb_img.paste(img, mask=img.split()[3])
-                        result.paste(rgb_img, (paste_x, paste_y))
-                    else:
-                        result.paste(img, (paste_x, paste_y))
-
-            # 保存结果
-            result.save(file_path, 'PNG')
+            # 保存图片
+            image.save(file_path, 'PNG')
 
             # 播放成功提示音
             QApplication.beep()
 
             # 更新状态栏，显示完整路径
+            width = int(scene_rect.width())
+            height = int(scene_rect.height())
             self.status_bar.showMessage(f"已保存到: {file_path} ({width}x{height})")
 
         except Exception as e:
