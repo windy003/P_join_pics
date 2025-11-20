@@ -138,7 +138,7 @@ class ImageComposer(QMainWindow):
         # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除")
+        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空")
 
         # 图片计数
         self.image_count = 0
@@ -311,10 +311,12 @@ class ImageComposer(QMainWindow):
         self.addAction(delete_action)  # 同时添加到主窗口
 
         # 清空画布
-        clear_action = QAction("🗑️ 清空", self)
-        clear_action.setToolTip("清空画布上的所有图片")
+        clear_action = QAction("🗑️ 清空 (Ctrl+Del)", self)
+        clear_action.setShortcut(QKeySequence("Ctrl+Del"))
+        clear_action.setToolTip("清空画布上的所有图片 (Ctrl+Del)")
         clear_action.triggered.connect(self.clear_canvas)
         self.toolbar1.addAction(clear_action)
+        self.addAction(clear_action)  # 同时添加到主窗口，确保快捷键始终有效
 
         # 强制换行，开始第二行工具栏
         self.addToolBarBreak()
@@ -538,18 +540,9 @@ class ImageComposer(QMainWindow):
 
     def clear_canvas(self):
         """清空画布"""
-        reply = QMessageBox.question(
-            self,
-            "确认",
-            "确定要清空所有图片吗？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply == QMessageBox.Yes:
-            self.scene.clear()
-            self.image_count = 0
-            self.status_bar.showMessage("画布已清空")
+        self.scene.clear()
+        self.image_count = 0
+        self.status_bar.showMessage("画布已清空")
 
     def fit_in_view(self):
         """适应窗口显示所有内容"""
