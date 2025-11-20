@@ -128,6 +128,9 @@ class ImageComposer(QMainWindow):
 
         self.setCentralWidget(self.view)
 
+        # 工具栏可见状态（默认隐藏）
+        self.toolbars_visible = False
+
         # 创建工具栏
         self.create_toolbar()
 
@@ -138,12 +141,6 @@ class ImageComposer(QMainWindow):
 
         # 图片计数
         self.image_count = 0
-
-        # 工具栏可见状态
-        self.toolbars_visible = True
-
-        # 默认隐藏工具栏
-        self.toggle_toolbars()
 
     def create_system_tray(self):
         """创建系统托盘图标"""
@@ -259,9 +256,9 @@ class ImageComposer(QMainWindow):
         self.addToolBar(self.toolbar1)
 
         # 添加折叠/展开按钮到工具栏最左侧
-        self.toggle_btn = QPushButton("◀")
+        self.toggle_btn = QPushButton("▶")
         self.toggle_btn.setFixedSize(20, 20)
-        self.toggle_btn.setToolTip("隐藏/展开工具栏")
+        self.toggle_btn.setToolTip("展开工具栏")
         self.toggle_btn.setStyleSheet("""
             QPushButton {
                 background-color: #e0e0e0;
@@ -278,7 +275,7 @@ class ImageComposer(QMainWindow):
             }
         """)
         self.toggle_btn.clicked.connect(self.toggle_toolbars)
-        self.toolbar1.insertWidget(self.toolbar1.actions()[0] if self.toolbar1.actions() else None, self.toggle_btn)
+        self.toolbar1.addWidget(self.toggle_btn)
 
         # 导入图片
         import_action = QAction("📁 导入 (Ctrl+O)", self)
@@ -286,6 +283,7 @@ class ImageComposer(QMainWindow):
         import_action.setToolTip("导入图片 (Ctrl+O)")
         import_action.triggered.connect(self.import_images)
         self.toolbar1.addAction(import_action)
+        self.addAction(import_action)  # 同时添加到主窗口，确保快捷键始终有效
 
         # 导出图片 - 添加Ctrl+E快捷键
         export_action = QAction("💾 导出 (Ctrl+E)", self)
@@ -293,6 +291,7 @@ class ImageComposer(QMainWindow):
         export_action.setToolTip("导出图片 (Ctrl+E 或 Ctrl+S)")
         export_action.triggered.connect(self.export_image)
         self.toolbar1.addAction(export_action)
+        self.addAction(export_action)  # 同时添加到主窗口
 
         # 额外绑定Ctrl+S快捷键（保持兼容性）
         export_action2 = QAction(self)
@@ -308,6 +307,7 @@ class ImageComposer(QMainWindow):
         delete_action.setToolTip("删除选中的图片 (Delete)")
         delete_action.triggered.connect(self.delete_selected)
         self.toolbar1.addAction(delete_action)
+        self.addAction(delete_action)  # 同时添加到主窗口
 
         # 清空画布
         clear_action = QAction("🗑️ 清空", self)
@@ -332,6 +332,7 @@ class ImageComposer(QMainWindow):
         zoom_in_action.setToolTip("放大选中的图片 (Ctrl+=)")
         zoom_in_action.triggered.connect(self.zoom_in_selected)
         self.toolbar2.addAction(zoom_in_action)
+        self.addAction(zoom_in_action)  # 同时添加到主窗口
 
         # 缩小图片
         zoom_out_action = QAction("🔍- 缩小 (Ctrl+-)", self)
@@ -339,6 +340,7 @@ class ImageComposer(QMainWindow):
         zoom_out_action.setToolTip("缩小选中的图片 (Ctrl+-)")
         zoom_out_action.triggered.connect(self.zoom_out_selected)
         self.toolbar2.addAction(zoom_out_action)
+        self.addAction(zoom_out_action)  # 同时添加到主窗口
 
         # 重置大小
         reset_size_action = QAction("↺ 重置 (Ctrl+0)", self)
@@ -346,6 +348,7 @@ class ImageComposer(QMainWindow):
         reset_size_action.setToolTip("重置选中图片的大小 (Ctrl+0)")
         reset_size_action.triggered.connect(self.reset_selected_size)
         self.toolbar2.addAction(reset_size_action)
+        self.addAction(reset_size_action)  # 同时添加到主窗口
 
         self.toolbar2.addSeparator()
 
@@ -355,6 +358,7 @@ class ImageComposer(QMainWindow):
         fit_action.setToolTip("调整视图以显示所有图片 (Ctrl+P)")
         fit_action.triggered.connect(self.fit_in_view)
         self.toolbar2.addAction(fit_action)
+        self.addAction(fit_action)  # 同时添加到主窗口
 
         # 重置视图
         reset_action = QAction("🔄 重置视图", self)
@@ -362,36 +366,54 @@ class ImageComposer(QMainWindow):
         reset_action.triggered.connect(self.reset_view)
         self.toolbar2.addAction(reset_action)
 
+        # 根据初始状态设置工具栏显示
+        if not self.toolbars_visible:
+            # 完全隐藏工具栏，只显示切换按钮
+            self.toolbar1.setMaximumHeight(30)  # 限制高度只显示按钮
+
+            # 只隐藏widget，不隐藏action（这样快捷键依然有效）
+            for i in range(self.toolbar1.layout().count()):
+                item = self.toolbar1.layout().itemAt(i)
+                if item and item.widget():
+                    widget = item.widget()
+                    if widget != self.toggle_btn:
+                        widget.setVisible(False)
+
+            self.toolbar2.hide()
+
     def toggle_toolbars(self):
         """切换工具栏的显示/隐藏状态"""
         self.toolbars_visible = not self.toolbars_visible
 
         if self.toolbars_visible:
             # 展开工具栏
-            self.toolbar1.show()
+            self.toolbar1.setMaximumHeight(16777215)  # 恢复默认最大高度
+
+            # 显示所有widget
+            for i in range(self.toolbar1.layout().count()):
+                item = self.toolbar1.layout().itemAt(i)
+                if item and item.widget():
+                    widget = item.widget()
+                    widget.setVisible(True)
+
             self.toolbar2.show()
             self.toggle_btn.setText("◀")
             self.toggle_btn.setToolTip("隐藏工具栏")
         else:
-            # 隐藏工具栏中除了切换按钮外的所有内容
-            for action in self.toolbar1.actions():
-                widget = self.toolbar1.widgetForAction(action)
-                if widget != self.toggle_btn:
-                    action.setVisible(False)
+            # 完全隐藏工具栏，只显示切换按钮
+            self.toolbar1.setMaximumHeight(30)  # 限制高度只显示按钮
 
-            for action in self.toolbar2.actions():
-                action.setVisible(False)
+            # 只隐藏widget，不隐藏action（这样快捷键依然有效）
+            for i in range(self.toolbar1.layout().count()):
+                item = self.toolbar1.layout().itemAt(i)
+                if item and item.widget():
+                    widget = item.widget()
+                    if widget != self.toggle_btn:
+                        widget.setVisible(False)
 
             self.toolbar2.hide()
             self.toggle_btn.setText("▶")
             self.toggle_btn.setToolTip("展开工具栏")
-
-        # 如果隐藏状态，需要重新显示所有action
-        if self.toolbars_visible:
-            for action in self.toolbar1.actions():
-                action.setVisible(True)
-            for action in self.toolbar2.actions():
-                action.setVisible(True)
 
     def import_images(self):
         """导入多张图片"""
