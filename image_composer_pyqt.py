@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphics
                              QWidget, QHBoxLayout, QSystemTrayIcon, QMenu, QDialog,
                              QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox, QStyle,
                              QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsItemGroup)
-from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject, QLineF
+from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject, QLineF, QTimer
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon, QPen, QColor, QPolygonF, QBrush
 from PIL import Image
 import os
@@ -16,6 +16,90 @@ try:
     KEYBOARD_AVAILABLE = True
 except ImportError:
     KEYBOARD_AVAILABLE = False
+
+
+# ===== 撤销/重做系统（仅支持箭头操作）=====
+
+class ArrowUndoStack:
+    """箭头操作的撤销栈管理器"""
+    def __init__(self):
+        self.undo_stack = []
+        self.redo_stack = []
+
+    def push_add_arrow(self, scene, arrow):
+        """添加箭头到撤销栈"""
+        self.undo_stack.append({'action': 'add', 'arrow': arrow, 'scene': scene})
+        # 执行新命令后清空重做栈
+        self.redo_stack.clear()
+
+    def push_delete_arrows(self, scene, arrows):
+        """删除箭头到撤销栈"""
+        # 保存箭头的状态
+        arrow_states = []
+        for arrow in arrows:
+            arrow_states.append({
+                'arrow': arrow,
+                'pos': arrow.pos(),
+                'z_value': arrow.zValue()
+            })
+        self.undo_stack.append({'action': 'delete', 'arrows': arrow_states, 'scene': scene})
+        # 执行新命令后清空重做栈
+        self.redo_stack.clear()
+
+    def undo(self):
+        """撤销最后一个命令"""
+        if not self.undo_stack:
+            return False
+
+        command = self.undo_stack.pop()
+
+        if command['action'] == 'add':
+            # 撤销添加 = 移除箭头
+            command['scene'].removeItem(command['arrow'])
+            self.redo_stack.append(command)
+        elif command['action'] == 'delete':
+            # 撤销删除 = 恢复箭头
+            for state in command['arrows']:
+                arrow = state['arrow']
+                command['scene'].addItem(arrow)
+                arrow.setPos(state['pos'])
+                arrow.setZValue(state['z_value'])
+            self.redo_stack.append(command)
+
+        return True
+
+    def redo(self):
+        """重做最后一个撤销的命令"""
+        if not self.redo_stack:
+            return False
+
+        command = self.redo_stack.pop()
+
+        if command['action'] == 'add':
+            # 重做添加 = 添加箭头
+            command['scene'].addItem(command['arrow'])
+            command['arrow'].setPos(command['arrow'].pos())
+            self.undo_stack.append(command)
+        elif command['action'] == 'delete':
+            # 重做删除 = 移除箭头
+            for state in command['arrows']:
+                command['scene'].removeItem(state['arrow'])
+            self.undo_stack.append(command)
+
+        return True
+
+    def can_undo(self):
+        """是否可以撤销"""
+        return len(self.undo_stack) > 0
+
+    def can_redo(self):
+        """是否可以重做"""
+        return len(self.redo_stack) > 0
+
+    def clear(self):
+        """清空撤销栈"""
+        self.undo_stack.clear()
+        self.redo_stack.clear()
 
 
 class HotkeySignalEmitter(QObject):
@@ -188,6 +272,8 @@ class CustomGraphicsView(QGraphicsView):
             self.main_window.temp_arrow_line = self.scene().addLine(
                 scene_pos.x(), scene_pos.y(), scene_pos.x(), scene_pos.y(), pen
             )
+            # 重置定时器（用户有操作）
+            self.main_window.arrow_mode_timer.start(60000)
             event.accept()  # 标记事件已处理
         else:
             super().mousePressEvent(event)
@@ -217,6 +303,8 @@ class CustomGraphicsView(QGraphicsView):
                 if (self.main_window.arrow_start_point - scene_pos).manhattanLength() > 10:
                     arrow = ArrowItem(self.main_window.arrow_start_point, scene_pos)
                     self.scene().addItem(arrow)
+                    # 添加到撤销栈
+                    self.main_window.arrow_undo_stack.push_add_arrow(self.scene(), arrow)
 
                 self.main_window.arrow_start_point = None
             event.accept()  # 标记事件已处理
@@ -233,6 +321,9 @@ class ImageComposer(QMainWindow):
         # 创建信号发射器用于线程安全的窗口显示
         self.hotkey_emitter = HotkeySignalEmitter()
         self.hotkey_emitter.show_signal.connect(self.show_window)
+
+        # 创建箭头操作的撤销栈
+        self.arrow_undo_stack = ArrowUndoStack()
 
         self.init_ui()
         self.create_system_tray()
@@ -264,13 +355,18 @@ class ImageComposer(QMainWindow):
         self.arrow_start_point = None
         self.temp_arrow_line = None
 
+        # 箭头模式自动退出定时器（1分钟）
+        self.arrow_mode_timer = QTimer()
+        self.arrow_mode_timer.timeout.connect(self.auto_exit_arrow_mode)
+        self.arrow_mode_timer.setSingleShot(True)  # 只触发一次
+
         # 创建工具栏
         self.create_toolbar()
 
         # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头")
+        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+Z 撤销 | Ctrl+Y 重做")
 
         # 图片计数
         self.image_count = 0
@@ -472,6 +568,30 @@ class ImageComposer(QMainWindow):
 
         self.toolbar2.addSeparator()
 
+        # 撤销箭头操作
+        undo_action = QAction("↶ 撤销 (Ctrl+Z)", self)
+        undo_action.setShortcut(QKeySequence("Ctrl+Z"))
+        undo_action.setToolTip("撤销上一个箭头操作 (Ctrl+Z)")
+        undo_action.triggered.connect(self.undo_arrow_action)
+        self.toolbar2.addAction(undo_action)
+        self.addAction(undo_action)
+
+        # 重做箭头操作 - 支持 Ctrl+Y 和 Ctrl+Shift+Z
+        redo_action = QAction("↷ 重做 (Ctrl+Y)", self)
+        redo_action.setShortcut(QKeySequence("Ctrl+Y"))
+        redo_action.setToolTip("重做箭头操作 (Ctrl+Y 或 Ctrl+Shift+Z)")
+        redo_action.triggered.connect(self.redo_arrow_action)
+        self.toolbar2.addAction(redo_action)
+        self.addAction(redo_action)
+
+        # 额外绑定 Ctrl+Shift+Z 快捷键
+        redo_action2 = QAction(self)
+        redo_action2.setShortcut(QKeySequence("Ctrl+Shift+Z"))
+        redo_action2.triggered.connect(self.redo_arrow_action)
+        self.addAction(redo_action2)
+
+        self.toolbar2.addSeparator()
+
         # 放大图片
         zoom_in_action = QAction("🔍+ 放大 (Ctrl+=)", self)
         zoom_in_action.setShortcut(QKeySequence("Ctrl+="))
@@ -632,18 +752,46 @@ class ImageComposer(QMainWindow):
             # 进入箭头模式
             self.view.setDragMode(QGraphicsView.NoDrag)
             self.view.viewport().setCursor(Qt.CrossCursor)
-            self.status_bar.showMessage("箭头绘制模式：按住鼠标左键拖动绘制箭头 | 再次按 Ctrl+A 退出")
+            self.status_bar.showMessage("箭头绘制模式：按住鼠标左键拖动绘制箭头 | 再次按 Ctrl+A 退出 | 1分钟无操作自动退出")
+            # 启动1分钟定时器
+            self.arrow_mode_timer.start(60000)  # 60000毫秒 = 1分钟
         else:
             # 退出箭头模式
             self.view.setDragMode(QGraphicsView.ScrollHandDrag)
             self.view.viewport().setCursor(Qt.ArrowCursor)
             self.status_bar.showMessage("已退出箭头绘制模式")
 
+            # 停止定时器
+            self.arrow_mode_timer.stop()
+
             # 清理未完成的临时线条
             if self.temp_arrow_line:
                 self.scene.removeItem(self.temp_arrow_line)
                 self.temp_arrow_line = None
             self.arrow_start_point = None
+
+    def auto_exit_arrow_mode(self):
+        """1分钟无操作后自动退出箭头模式"""
+        if self.arrow_mode:
+            # 取消箭头模式的选中状态
+            self.arrow_action.setChecked(False)
+            # 调用切换方法退出箭头模式
+            self.toggle_arrow_mode()
+            self.status_bar.showMessage("箭头绘制模式已自动退出（1分钟无操作）")
+
+    def undo_arrow_action(self):
+        """撤销箭头操作"""
+        if self.arrow_undo_stack.undo():
+            self.status_bar.showMessage("已撤销箭头操作")
+        else:
+            self.status_bar.showMessage("没有可撤销的箭头操作")
+
+    def redo_arrow_action(self):
+        """重做箭头操作"""
+        if self.arrow_undo_stack.redo():
+            self.status_bar.showMessage("已重做箭头操作")
+        else:
+            self.status_bar.showMessage("没有可重做的箭头操作")
 
     def delete_selected(self):
         """删除选中的图片或箭头"""
@@ -655,14 +803,21 @@ class ImageComposer(QMainWindow):
 
         image_count = 0
         arrow_count = 0
+        arrows_to_delete = []
 
         for item in selected_items:
             if isinstance(item, DraggablePixmapItem):
                 image_count += 1
                 self.image_count -= 1
+                self.scene.removeItem(item)
             elif isinstance(item, ArrowItem):
                 arrow_count += 1
-            self.scene.removeItem(item)
+                arrows_to_delete.append(item)
+                self.scene.removeItem(item)
+
+        # 将箭头删除操作添加到撤销栈
+        if arrows_to_delete:
+            self.arrow_undo_stack.push_delete_arrows(self.scene, arrows_to_delete)
 
         msg = []
         if image_count > 0:
