@@ -216,7 +216,7 @@ class ArrowItem(QGraphicsItemGroup):
 
 class DraggablePixmapItem(QGraphicsPixmapItem):
     """可拖拽的图片项"""
-    def __init__(self, pixmap, original_image, display_scale=1.0):
+    def __init__(self, pixmap, original_image, display_scale=1.0, file_path=None):
         super().__init__(pixmap)
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
@@ -227,6 +227,7 @@ class DraggablePixmapItem(QGraphicsPixmapItem):
         self.original_image = original_image
         self.display_scale = display_scale  # 原始图片到显示图片的缩放比例
         self.user_scale = 1.0  # 用户编辑时的缩放比例
+        self.file_path = file_path  # 保存原始文件路径
 
         # 设置变换原点为中心
         self.setTransformOriginPoint(self.boundingRect().center())
@@ -708,8 +709,8 @@ class ImageComposer(QMainWindow):
                 # 转换为QPixmap
                 pixmap = self.pil_to_qpixmap(display_image)
 
-                # 创建可拖拽的图片项（display_scale=1.0表示不缩放）
-                item = DraggablePixmapItem(pixmap, pil_image, display_scale=1.0)
+                # 创建可拖拽的图片项（display_scale=1.0表示不缩放，传递文件路径）
+                item = DraggablePixmapItem(pixmap, pil_image, display_scale=1.0, file_path=file_path)
 
                 # 设置位置（每张图片稍微错开）
                 x = offset_x + (i * 40)
@@ -939,6 +940,33 @@ class ImageComposer(QMainWindow):
             width = int(scene_rect.width())
             height = int(scene_rect.height())
             self.status_bar.showMessage(f"已保存到: {file_path} ({width}x{height})")
+
+            # 导出成功后，删除画布中的所有图片并删除源文件
+            deleted_files = []
+            failed_deletions = []
+
+            for item in list(all_items):  # 使用list()创建副本，避免在迭代时修改
+                if isinstance(item, DraggablePixmapItem):
+                    # 尝试删除源文件
+                    if item.file_path and os.path.exists(item.file_path):
+                        try:
+                            os.remove(item.file_path)
+                            deleted_files.append(os.path.basename(item.file_path))
+                        except Exception as e:
+                            failed_deletions.append(f"{os.path.basename(item.file_path)}: {str(e)}")
+
+                    # 从场景中删除图片
+                    self.scene.removeItem(item)
+                    self.image_count -= 1
+
+            # 更新状态栏消息，包含删除信息
+            status_msg = f"已保存到: {file_path} ({width}x{height})"
+            if deleted_files:
+                status_msg += f" | 已删除 {len(deleted_files)} 个源文件"
+            if failed_deletions:
+                status_msg += f" | {len(failed_deletions)} 个文件删除失败"
+
+            self.status_bar.showMessage(status_msg)
 
         except Exception as e:
             # 播放错误提示音
