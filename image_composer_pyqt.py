@@ -1016,7 +1016,8 @@ def main():
     app.setStyle('Fusion')  # 使用现代风格
 
     window = ImageComposer()
-    window.showMaximized()  # 启动时最大化窗口
+    # 启动时不显示窗口，直接最小化到系统托盘
+    # window.showMaximized()  # 已注释：改为默认托盘模式
 
     sys.exit(app.exec_())
 
