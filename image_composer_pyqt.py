@@ -117,7 +117,7 @@ class HotkeySettingsDialog(QDialog):
         layout = QVBoxLayout()
 
         # 说明文字
-        info_label = QLabel("设置全局快捷键来唤出窗口")
+        info_label = QLabel("设置全局快捷键来显示/隐藏窗口")
         layout.addWidget(info_label)
 
         # 快捷键输入框
@@ -319,9 +319,9 @@ class ImageComposer(QMainWindow):
         self.settings = QSettings("ImageComposer", "Settings")
         self.hotkey = self.settings.value("hotkey", "ctrl+win+z")
 
-        # 创建信号发射器用于线程安全的窗口显示
+        # 创建信号发射器用于线程安全的窗口显示/隐藏切换
         self.hotkey_emitter = HotkeySignalEmitter()
-        self.hotkey_emitter.show_signal.connect(self.show_window)
+        self.hotkey_emitter.show_signal.connect(self.toggle_window)
 
         # 创建箭头操作的撤销栈
         self.arrow_undo_stack = ArrowUndoStack()
@@ -432,6 +432,21 @@ class ImageComposer(QMainWindow):
         self.show()
         self.activateWindow()
         self.raise_()
+
+    def toggle_window(self):
+        """切换窗口的显示/隐藏状态"""
+        if self.isVisible():
+            # 窗口当前可见，隐藏到托盘
+            self.hide()
+            self.tray_icon.showMessage(
+                "图片合成器",
+                "程序已最小化到系统托盘\n双击托盘图标或使用快捷键可重新打开",
+                QSystemTrayIcon.Information,
+                2000
+            )
+        else:
+            # 窗口当前隐藏，显示窗口
+            self.show_window()
 
     def setup_global_hotkey(self):
         """设置全局快捷键"""
