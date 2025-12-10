@@ -5,8 +5,9 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphics
                              QWidget, QHBoxLayout, QSystemTrayIcon, QMenu, QDialog,
                              QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox, QStyle,
                              QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsItemGroup)
-from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject, QLineF, QTimer
+from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject, QLineF, QTimer, QUrl
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon, QPen, QColor, QPolygonF, QBrush
+from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PIL import Image
 import os
 from datetime import datetime
@@ -325,6 +326,10 @@ class ImageComposer(QMainWindow):
 
         # 创建箭头操作的撤销栈
         self.arrow_undo_stack = ArrowUndoStack()
+
+        # 初始化音频播放器
+        self.media_player = QMediaPlayer()
+        self.success_sound_path = os.path.join(os.path.dirname(__file__), "prompt_tone.mp3")
 
         self.init_ui()
         self.create_system_tray()
@@ -949,7 +954,11 @@ class ImageComposer(QMainWindow):
             image.save(file_path, 'PNG')
 
             # 播放成功提示音
-            QApplication.beep()
+            if os.path.exists(self.success_sound_path):
+                self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(self.success_sound_path)))
+                self.media_player.play()
+            else:
+                QApplication.beep()  # 如果音频文件不存在，使用系统默认音
 
             # 更新状态栏，显示完整路径
             width = int(scene_rect.width())
