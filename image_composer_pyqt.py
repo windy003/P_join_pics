@@ -11,6 +11,7 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PIL import Image
 import os
 from datetime import datetime
+import ctypes
 
 try:
     import keyboard
@@ -339,6 +340,11 @@ class ImageComposer(QMainWindow):
         """初始化用户界面"""
         self.setWindowTitle("图片合成器 - Image Composer (PyQt5)")
         self.setGeometry(100, 100, 1400, 900)
+
+        # 设置窗口图标（任务栏图标）
+        icon_path = os.path.join(os.path.dirname(__file__), "2048x2048.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         # 创建场景和视图
         self.scene = QGraphicsScene()
@@ -1032,6 +1038,14 @@ class ImageComposer(QMainWindow):
 
 
 def main():
+    # 设置Windows任务栏图标（需要在创建QApplication之前）
+    try:
+        # 设置AppUserModelID，让Windows任务栏显示自定义图标
+        myappid = 'ImageComposer.PyQt5.App.1.0'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    except:
+        pass  # 非Windows系统或设置失败时忽略
+
     # 启用高DPI缩放
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
