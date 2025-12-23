@@ -4,7 +4,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphics
                              QAction, QStatusBar, QGraphicsItem, QSizePolicy, QPushButton,
                              QWidget, QHBoxLayout, QSystemTrayIcon, QMenu, QDialog,
                              QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox, QStyle,
-                             QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsItemGroup)
+                             QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsItemGroup,
+                             QListWidget, QListWidgetItem, QAbstractItemView, QCheckBox)
 from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject, QLineF, QTimer, QUrl
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon, QPen, QColor, QPolygonF, QBrush
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
@@ -107,6 +108,146 @@ class ArrowUndoStack:
 class HotkeySignalEmitter(QObject):
     """用于从keyboard库线程发送信号到Qt主线程的信号发射器"""
     show_signal = pyqtSignal()
+
+
+class CustomImagePicker(QDialog):
+    """自定义图片选择器，按创建时间排序，只显示最新5张"""
+    def __init__(self, default_path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("选择图片文件 (最新5张)")
+        self.setModal(True)
+        self.resize(900, 700)
+
+        self.selected_files = []
+        self.default_path = default_path
+
+        self.init_ui()
+        self.load_images()
+
+    def init_ui(self):
+        """初始化UI"""
+        layout = QVBoxLayout()
+
+        # 路径显示标签
+        self.path_label = QLabel(f"目录: {self.default_path}")
+        self.path_label.setStyleSheet("font-weight: bold; padding: 5px;")
+        layout.addWidget(self.path_label)
+
+        # 提示信息
+        info_label = QLabel("显示最新的5张图片，按创建时间从新到旧排序。双击或勾选文件进行选择。")
+        info_label.setStyleSheet("color: gray; font-size: 11px; padding: 5px;")
+        layout.addWidget(info_label)
+
+        # 文件列表
+        self.file_list = QListWidget()
+        self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.file_list.setIconSize(QSize(200, 200))  # 设置大尺寸高清缩略图
+        self.file_list.setSpacing(10)  # 增加项目间距
+        self.file_list.itemDoubleClicked.connect(self.on_item_double_clicked)
+        layout.addWidget(self.file_list)
+
+        # 底部按钮栏
+        button_layout = QHBoxLayout()
+
+        # 全选/取消全选
+        self.select_all_btn = QPushButton("全选")
+        self.select_all_btn.clicked.connect(self.select_all)
+        button_layout.addWidget(self.select_all_btn)
+
+        self.deselect_all_btn = QPushButton("取消全选")
+        self.deselect_all_btn.clicked.connect(self.deselect_all)
+        button_layout.addWidget(self.deselect_all_btn)
+
+        button_layout.addStretch()
+
+        # 确认/取消按钮
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept_selection)
+        buttons.rejected.connect(self.reject)
+        button_layout.addWidget(buttons)
+
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
+
+    def load_images(self):
+        """加载图片文件并按创建时间排序"""
+        if not os.path.exists(self.default_path):
+            self.path_label.setText(f"目录不存在: {self.default_path}")
+            return
+
+        # 支持的图片格式
+        image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
+
+        # 获取所有图片文件及其创建时间
+        files_with_time = []
+        for filename in os.listdir(self.default_path):
+            if filename.lower().endswith(image_extensions):
+                file_path = os.path.join(self.default_path, filename)
+                try:
+                    # 获取文件创建时间
+                    create_time = os.path.getctime(file_path)
+                    files_with_time.append((file_path, filename, create_time))
+                except Exception:
+                    continue
+
+        # 按创建时间从新到旧排序（时间大的在前）
+        files_with_time.sort(key=lambda x: x[2], reverse=True)
+
+        # 只取前5张图片
+        files_with_time = files_with_time[:5]
+
+        # 加载前5张图片（带高清缩略图）
+        for file_path, filename, create_time in files_with_time:
+            # 格式化时间
+            time_str = datetime.fromtimestamp(create_time).strftime("%Y-%m-%d %H:%M:%S")
+
+            # 创建高清缩略图
+            try:
+                pixmap = QPixmap(file_path)
+                if not pixmap.isNull():
+                    # 使用高质量缩放，保持宽高比
+                    thumbnail = pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    icon = QIcon(thumbnail)
+                else:
+                    icon = QIcon()
+            except Exception:
+                icon = QIcon()
+
+            # 创建列表项
+            item = QListWidgetItem(icon, f"{filename}\n{time_str}")
+            item.setData(Qt.UserRole, file_path)  # 存储完整路径
+            self.file_list.addItem(item)
+
+        # 更新计数
+        total_count = len([f for f in os.listdir(self.default_path)
+                          if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])
+        self.path_label.setText(f"目录: {self.default_path}  (显示最新 {len(files_with_time)}/{total_count} 张)")
+
+    def select_all(self):
+        """全选"""
+        for i in range(self.file_list.count()):
+            self.file_list.item(i).setSelected(True)
+
+    def deselect_all(self):
+        """取消全选"""
+        self.file_list.clearSelection()
+
+    def on_item_double_clicked(self, item):
+        """双击文件项，直接选中该文件并关闭对话框"""
+        file_path = item.data(Qt.UserRole)
+        self.selected_files = [file_path]
+        self.accept()
+
+    def accept_selection(self):
+        """确认选择"""
+        selected_items = self.file_list.selectedItems()
+        self.selected_files = [item.data(Qt.UserRole) for item in selected_items]
+        self.accept()
+
+    def get_selected_files(self):
+        """获取选中的文件列表"""
+        return self.selected_files
 
 
 class HotkeySettingsDialog(QDialog):
@@ -716,13 +857,12 @@ class ImageComposer(QMainWindow):
         if not os.path.exists(default_path):
             default_path = os.path.expanduser("~")
 
-        file_paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "选择图片文件",
-            default_path,
-            "图片文件 (*.png *.jpg *.jpeg *.gif *.bmp);;所有文件 (*.*)"
-        )
+        # 使用自定义图片选择器
+        picker = CustomImagePicker(default_path, self)
+        if picker.exec_() != QDialog.Accepted:
+            return
 
+        file_paths = picker.get_selected_files()
         if not file_paths:
             return
 
