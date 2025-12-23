@@ -710,10 +710,16 @@ class ImageComposer(QMainWindow):
 
     def import_images(self):
         """导入多张图片"""
+        # 设置默认路径为 OneDrive\图片\Screenshots
+        default_path = os.path.join(os.path.expanduser("~"), "OneDrive", "图片", "Screenshots")
+        # 如果目录不存在，回退到用户主目录
+        if not os.path.exists(default_path):
+            default_path = os.path.expanduser("~")
+
         file_paths, _ = QFileDialog.getOpenFileNames(
             self,
             "选择图片文件",
-            "",
+            default_path,
             "图片文件 (*.png *.jpg *.jpeg *.gif *.bmp);;所有文件 (*.*)"
         )
 
@@ -1054,8 +1060,8 @@ def main():
     app.setStyle('Fusion')  # 使用现代风格
 
     window = ImageComposer()
-    # 启动时不显示窗口，直接最小化到系统托盘
-    # window.showMaximized()  # 已注释：改为默认托盘模式
+    # 启动时最大化显示窗口
+    window.showMaximized()
 
     sys.exit(app.exec_())
 
