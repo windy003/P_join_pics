@@ -519,7 +519,7 @@ class ImageComposer(QMainWindow):
         # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+Z 撤销 | Ctrl+Y 重做")
+        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+2/3/4 导入最近2/3/4张 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+Z 撤销 | Ctrl+Y 重做")
 
         # 图片计数
         self.image_count = 0
@@ -902,6 +902,78 @@ class ImageComposer(QMainWindow):
 
         self.status_bar.showMessage(f"已导入 {len(file_paths)} 张图片，画布共有 {self.image_count} 张图片")
 
+    def import_recent_images(self, count):
+        """自动导入最近的N张图片（不打开对话框）"""
+        # 设置默认路径为 OneDrive\图片\Screenshots
+        default_path = os.path.join(os.path.expanduser("~"), "OneDrive", "图片", "Screenshots")
+
+        # 如果目录不存在，显示错误信息
+        if not os.path.exists(default_path):
+            self.status_bar.showMessage(f"目录不存在: {default_path}")
+            QApplication.beep()
+            return
+
+        # 支持的图片格式
+        image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
+
+        # 获取所有图片文件及其创建时间
+        files_with_time = []
+        for filename in os.listdir(default_path):
+            if filename.lower().endswith(image_extensions):
+                file_path = os.path.join(default_path, filename)
+                try:
+                    # 获取文件创建时间
+                    create_time = os.path.getctime(file_path)
+                    files_with_time.append((file_path, create_time))
+                except Exception:
+                    continue
+
+        # 按创建时间从新到旧排序（时间大的在前）
+        files_with_time.sort(key=lambda x: x[1], reverse=True)
+
+        # 只取前N张图片
+        files_with_time = files_with_time[:count]
+
+        if not files_with_time:
+            self.status_bar.showMessage(f"在 {default_path} 中没有找到图片")
+            QApplication.beep()
+            return
+
+        # 起始位置
+        offset_x = 100
+        offset_y = 100
+
+        imported_count = 0
+        for i, (file_path, _) in enumerate(files_with_time):
+            try:
+                # 使用PIL加载原始图片
+                pil_image = Image.open(file_path)
+
+                # 直接使用原始图片，不进行缩放
+                display_image = pil_image
+
+                # 转换为QPixmap
+                pixmap = self.pil_to_qpixmap(display_image)
+
+                # 创建可拖拽的图片项（display_scale=1.0表示不缩放，传递文件路径）
+                item = DraggablePixmapItem(pixmap, pil_image, display_scale=1.0, file_path=file_path)
+
+                # 设置位置（每张图片稍微错开）
+                x = offset_x + (i * 40)
+                y = offset_y + (i * 40)
+                item.setPos(x, y)
+
+                # 添加到场景
+                self.scene.addItem(item)
+                self.image_count += 1
+                imported_count += 1
+
+            except Exception as e:
+                print(f"无法加载图片 {os.path.basename(file_path)}: {str(e)}")
+                continue
+
+        self.status_bar.showMessage(f"已自动导入最近的 {imported_count} 张图片，画布共有 {self.image_count} 张图片")
+
     def pil_to_qpixmap(self, pil_image):
         """将PIL图片转换为QPixmap"""
         # 转换为RGBA模式
@@ -1160,6 +1232,15 @@ class ImageComposer(QMainWindow):
                 self.zoom_out_selected()
             elif event.key() == Qt.Key_0:
                 self.reset_selected_size()
+            elif event.key() == Qt.Key_2:
+                # Ctrl+2: 导入最近2张图片
+                self.import_recent_images(2)
+            elif event.key() == Qt.Key_3:
+                # Ctrl+3: 导入最近3张图片
+                self.import_recent_images(3)
+            elif event.key() == Qt.Key_4:
+                # Ctrl+4: 导入最近4张图片
+                self.import_recent_images(4)
             else:
                 super().keyPressEvent(event)
         else:
