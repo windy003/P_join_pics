@@ -326,7 +326,6 @@ class ArrowItem(QGraphicsItemGroup):
         self.line.setPen(self.pen)
 
         # 计算箭头头部
-        angle = line.angle() * 3.14159 / 180.0
         arrow_p1 = self.end_point - QPointF(
             self.arrow_size * (line.dx() / line.length() + 0.5 * line.dy() / line.length()),
             self.arrow_size * (line.dy() / line.length() - 0.5 * line.dx() / line.length())
