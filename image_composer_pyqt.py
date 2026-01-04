@@ -11,6 +11,14 @@ from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon, QPen, QC
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PIL import Image
 import os
+
+# 音频设备选择相关
+try:
+    import sounddevice as sd
+    import soundfile as sf
+    SOUNDDEVICE_AVAILABLE = True
+except ImportError:
+    SOUNDDEVICE_AVAILABLE = False
 from datetime import datetime
 import ctypes
 
@@ -472,6 +480,9 @@ class ImageComposer(QMainWindow):
         self.media_player = QMediaPlayer()
         self.success_sound_path = os.path.join(os.path.dirname(__file__), "prompt_tone.mp3")
 
+        # 查找笔记本扬声器设备ID
+        self.speaker_device_id = self.find_speaker_device()
+
         self.init_ui()
         self.create_system_tray()
         self.setup_global_hotkey()
@@ -598,6 +609,56 @@ class ImageComposer(QMainWindow):
         else:
             # 窗口当前隐藏，显示窗口
             self.show_window()
+
+    def find_speaker_device(self):
+        """查找笔记本扬声器设备"""
+        if not SOUNDDEVICE_AVAILABLE:
+            return None
+
+        try:
+            devices = sd.query_devices()
+            # 常见的扬声器设备名称关键词
+            speaker_keywords = ['realtek', '扬声器', 'speaker', 'speakers', 'synaptics', 'conexant', 'high definition audio']
+
+            for i, device in enumerate(devices):
+                # 只查找输出设备
+                if device['max_output_channels'] > 0:
+                    device_name = device['name'].lower()
+                    # 排除蓝牙设备
+                    if 'bluetooth' in device_name or 'bt' in device_name or 'wireless' in device_name:
+                        continue
+                    # 查找扬声器关键词
+                    for keyword in speaker_keywords:
+                        if keyword in device_name:
+                            print(f"找到扬声器设备: {device['name']} (ID: {i})")
+                            return i
+
+            # 如果没找到匹配的，返回None使用默认设备
+            print("未找到特定扬声器设备，将使用默认设备")
+            return None
+        except Exception as e:
+            print(f"查找音频设备失败: {e}")
+            return None
+
+    def play_success_sound(self):
+        """通过笔记本扬声器播放成功提示音"""
+        if not os.path.exists(self.success_sound_path):
+            QApplication.beep()
+            return
+
+        if SOUNDDEVICE_AVAILABLE and self.speaker_device_id is not None:
+            try:
+                # 使用 sounddevice 播放，指定输出设备
+                data, samplerate = sf.read(self.success_sound_path)
+                sd.play(data, samplerate, device=self.speaker_device_id)
+                # 不等待播放完成，让程序继续运行
+                return
+            except Exception as e:
+                print(f"通过扬声器播放失败: {e}")
+
+        # 回退到 QMediaPlayer（使用默认设备）
+        self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(self.success_sound_path)))
+        self.media_player.play()
 
     def setup_global_hotkey(self):
         """设置全局快捷键"""
@@ -1176,12 +1237,8 @@ class ImageComposer(QMainWindow):
             # 保存图片
             image.save(file_path, 'PNG')
 
-            # 播放成功提示音
-            if os.path.exists(self.success_sound_path):
-                self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(self.success_sound_path)))
-                self.media_player.play()
-            else:
-                QApplication.beep()  # 如果音频文件不存在，使用系统默认音
+            # 播放成功提示音（通过笔记本扬声器）
+            self.play_success_sound()
 
             # 更新状态栏，显示完整路径
             width = int(scene_rect.width())
