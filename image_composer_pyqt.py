@@ -529,7 +529,7 @@ class ImageComposer(QMainWindow):
         # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+2/3/4 导入最近2/3/4张 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+Z 撤销 | Ctrl+Y 重做")
+        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+1/2/3/4 导入最近1/2/3/4张 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+Z 撤销 | Ctrl+Y 重做")
 
         # 图片计数
         self.image_count = 0
@@ -1288,6 +1288,9 @@ class ImageComposer(QMainWindow):
                 self.zoom_out_selected()
             elif event.key() == Qt.Key_0:
                 self.reset_selected_size()
+            elif event.key() == Qt.Key_1:
+                # Ctrl+1: 导入最近1张图片
+                self.import_recent_images(1)
             elif event.key() == Qt.Key_2:
                 # Ctrl+2: 导入最近2张图片
                 self.import_recent_images(2)
