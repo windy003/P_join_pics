@@ -1340,8 +1340,14 @@ def main():
     app.setStyle('Fusion')  # 使用现代风格
 
     window = ImageComposer()
-    # 启动时最大化显示窗口
-    window.showMaximized()
+    # 启动时直接驻守在系统托盘，不显示窗口
+    # 显示托盘提示消息
+    window.tray_icon.showMessage(
+        "图片合成器",
+        f"程序已启动并驻守在系统托盘\n快捷键 {window.hotkey} 可打开窗口\n双击托盘图标也可以打开",
+        QSystemTrayIcon.Information,
+        3000
+    )
 
     sys.exit(app.exec_())
 
