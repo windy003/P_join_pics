@@ -483,6 +483,9 @@ class ImageComposer(QMainWindow):
         # 查找笔记本扬声器设备ID
         self.speaker_device_id = self.find_speaker_device()
 
+        # 标记是否是第一次显示窗口
+        self.first_show = True
+
         self.init_ui()
         self.create_system_tray()
         self.setup_global_hotkey()
@@ -591,7 +594,13 @@ class ImageComposer(QMainWindow):
 
     def show_window(self):
         """显示窗口"""
-        self.show()
+        if self.first_show:
+            # 第一次显示时最大化
+            self.showMaximized()
+            self.first_show = False
+        else:
+            # 后续显示时使用普通显示
+            self.show()
         self.activateWindow()
         self.raise_()
 
