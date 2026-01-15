@@ -300,6 +300,52 @@ class HotkeySettingsDialog(QDialog):
         return self.hotkey_edit.text().strip()
 
 
+class LineItem(QGraphicsItemGroup):
+    """可拖拽的细线"""
+    def __init__(self, start_point, end_point):
+        super().__init__()
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+
+        self.start_point = start_point
+        self.end_point = end_point
+
+        # 细线样式 - 使用较细的红色线
+        self.pen = QPen(QColor(255, 0, 0), 2, Qt.SolidLine)
+
+        # 创建线条
+        self.line = QGraphicsLineItem()
+
+        self.addToGroup(self.line)
+
+        self.update_line()
+
+        self.setCursor(Qt.OpenHandCursor)
+
+    def update_line(self):
+        """更新线条的位置"""
+        # 设置线条
+        line = QLineF(self.start_point, self.end_point)
+        self.line.setLine(line)
+        self.line.setPen(self.pen)
+
+    def mousePressEvent(self, event):
+        self.setCursor(Qt.ClosedHandCursor)
+        # 选中时自动置顶
+        if self.scene():
+            max_z = 0
+            for item in self.scene().items():
+                if isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem)):
+                    max_z = max(max_z, item.zValue())
+            self.setZValue(max_z + 1)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.setCursor(Qt.OpenHandCursor)
+        super().mouseReleaseEvent(event)
+
+
 class ArrowItem(QGraphicsItemGroup):
     """可拖拽的箭头"""
     def __init__(self, start_point, end_point):
@@ -354,7 +400,7 @@ class ArrowItem(QGraphicsItemGroup):
         if self.scene():
             max_z = 0
             for item in self.scene().items():
-                if isinstance(item, (DraggablePixmapItem, ArrowItem)):
+                if isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem)):
                     max_z = max(max_z, item.zValue())
             self.setZValue(max_z + 1)
         super().mousePressEvent(event)
@@ -426,16 +472,42 @@ class CustomGraphicsView(QGraphicsView):
             # 重置定时器（用户有操作）
             self.main_window.arrow_mode_timer.start(60000)
             event.accept()  # 标记事件已处理
+        elif self.main_window and self.main_window.line_mode and event.button() == Qt.LeftButton:
+            # 画线绘制模式
+            scene_pos = self.mapToScene(event.pos())
+            self.main_window.line_start_point = scene_pos
+
+            # 创建临时线条用于预览
+            pen = QPen(QColor(255, 0, 0, 150), 2, Qt.DashLine)
+            self.main_window.temp_line = self.scene().addLine(
+                scene_pos.x(), scene_pos.y(), scene_pos.x(), scene_pos.y(), pen
+            )
+            # 重置定时器（用户有操作）
+            self.main_window.line_mode_timer.start(60000)
+            event.accept()  # 标记事件已处理
         else:
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self.main_window and self.main_window.arrow_mode and self.main_window.arrow_start_point:
-            # 更新临时线条
-            scene_pos = self.mapToScene(event.pos())
-            if self.main_window.temp_arrow_line:
-                line = QLineF(self.main_window.arrow_start_point, scene_pos)
-                self.main_window.temp_arrow_line.setLine(line)
+        if self.main_window and self.main_window.arrow_mode:
+            # 强制保持十字光标
+            self.viewport().setCursor(Qt.CrossCursor)
+            if self.main_window.arrow_start_point:
+                # 更新临时箭头线条
+                scene_pos = self.mapToScene(event.pos())
+                if self.main_window.temp_arrow_line:
+                    line = QLineF(self.main_window.arrow_start_point, scene_pos)
+                    self.main_window.temp_arrow_line.setLine(line)
+            event.accept()  # 标记事件已处理
+        elif self.main_window and self.main_window.line_mode:
+            # 强制保持十字光标
+            self.viewport().setCursor(Qt.CrossCursor)
+            if self.main_window.line_start_point:
+                # 更新临时细线
+                scene_pos = self.mapToScene(event.pos())
+                if self.main_window.temp_line:
+                    line = QLineF(self.main_window.line_start_point, scene_pos)
+                    self.main_window.temp_line.setLine(line)
             event.accept()  # 标记事件已处理
         else:
             super().mouseMoveEvent(event)
@@ -458,6 +530,24 @@ class CustomGraphicsView(QGraphicsView):
                     self.main_window.arrow_undo_stack.push_add_arrow(self.scene(), arrow)
 
                 self.main_window.arrow_start_point = None
+            event.accept()  # 标记事件已处理
+        elif self.main_window and self.main_window.line_mode and event.button() == Qt.LeftButton:
+            if self.main_window.line_start_point:
+                scene_pos = self.mapToScene(event.pos())
+
+                # 移除临时线条
+                if self.main_window.temp_line:
+                    self.scene().removeItem(self.main_window.temp_line)
+                    self.main_window.temp_line = None
+
+                # 创建细线（只有当起点和终点不同时）
+                if (self.main_window.line_start_point - scene_pos).manhattanLength() > 10:
+                    line = LineItem(self.main_window.line_start_point, scene_pos)
+                    self.scene().addItem(line)
+                    # 添加到撤销栈
+                    self.main_window.arrow_undo_stack.push_add_arrow(self.scene(), line)
+
+                self.main_window.line_start_point = None
             event.accept()  # 标记事件已处理
         else:
             super().mouseReleaseEvent(event)
@@ -526,13 +616,23 @@ class ImageComposer(QMainWindow):
         self.arrow_mode_timer.timeout.connect(self.auto_exit_arrow_mode)
         self.arrow_mode_timer.setSingleShot(True)  # 只触发一次
 
+        # 画线绘制模式
+        self.line_mode = False
+        self.line_start_point = None
+        self.temp_line = None
+
+        # 画线模式自动退出定时器（1分钟）
+        self.line_mode_timer = QTimer()
+        self.line_mode_timer.timeout.connect(self.auto_exit_line_mode)
+        self.line_mode_timer.setSingleShot(True)  # 只触发一次
+
         # 创建工具栏
         self.create_toolbar()
 
         # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+1/2/3/4 导入最近1/2/3/4张 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+Z 撤销 | Ctrl+Y 重做")
+        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+1/2/3/4 导入最近1/2/3/4张 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+L 画线 | Ctrl+Z 撤销 | Ctrl+Y 重做")
 
         # 图片计数
         self.image_count = 0
@@ -803,6 +903,15 @@ class ImageComposer(QMainWindow):
         self.toolbar2.addAction(self.arrow_action)
         self.addAction(self.arrow_action)
 
+        # 画线模式
+        self.line_action = QAction("📏 画细线 (Ctrl+L)", self)
+        self.line_action.setShortcut(QKeySequence("Ctrl+L"))
+        self.line_action.setToolTip("开启/关闭细线绘制模式 (Ctrl+L)")
+        self.line_action.setCheckable(True)
+        self.line_action.triggered.connect(self.toggle_line_mode)
+        self.toolbar2.addAction(self.line_action)
+        self.addAction(self.line_action)
+
         self.toolbar2.addSeparator()
 
         # 撤销箭头操作
@@ -1063,15 +1172,24 @@ class ImageComposer(QMainWindow):
         self.arrow_mode = self.arrow_action.isChecked()
 
         if self.arrow_mode:
-            # 进入箭头模式
+            # 进入箭头模式，先退出画线模式
+            if self.line_mode:
+                self.line_action.setChecked(False)
+                self.toggle_line_mode()
+
+            # 先设置为NoDrag模式，再设置光标
             self.view.setDragMode(QGraphicsView.NoDrag)
+            # 强制设置视图和视口的光标为十字光标
+            self.view.setCursor(Qt.CrossCursor)
             self.view.viewport().setCursor(Qt.CrossCursor)
+            self.view.viewport().setMouseTracking(True)
             self.status_bar.showMessage("箭头绘制模式：按住鼠标左键拖动绘制箭头 | 再次按 Ctrl+A 退出 | 1分钟无操作自动退出")
             # 启动1分钟定时器
             self.arrow_mode_timer.start(60000)  # 60000毫秒 = 1分钟
         else:
             # 退出箭头模式
             self.view.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.view.setCursor(Qt.ArrowCursor)
             self.view.viewport().setCursor(Qt.ArrowCursor)
             self.status_bar.showMessage("已退出箭头绘制模式")
 
@@ -1093,6 +1211,50 @@ class ImageComposer(QMainWindow):
             self.toggle_arrow_mode()
             self.status_bar.showMessage("箭头绘制模式已自动退出（1分钟无操作）")
 
+    def toggle_line_mode(self):
+        """切换细线绘制模式"""
+        self.line_mode = self.line_action.isChecked()
+
+        if self.line_mode:
+            # 进入画线模式，先退出箭头模式
+            if self.arrow_mode:
+                self.arrow_action.setChecked(False)
+                self.toggle_arrow_mode()
+
+            # 先设置为NoDrag模式，再设置光标
+            self.view.setDragMode(QGraphicsView.NoDrag)
+            # 强制设置视图和视口的光标为十字光标
+            self.view.setCursor(Qt.CrossCursor)
+            self.view.viewport().setCursor(Qt.CrossCursor)
+            self.view.viewport().setMouseTracking(True)
+            self.status_bar.showMessage("细线绘制模式：按住鼠标左键拖动绘制细线 | 再次按 Ctrl+L 退出 | 1分钟无操作自动退出")
+            # 启动1分钟定时器
+            self.line_mode_timer.start(60000)  # 60000毫秒 = 1分钟
+        else:
+            # 退出画线模式
+            self.view.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.view.setCursor(Qt.ArrowCursor)
+            self.view.viewport().setCursor(Qt.ArrowCursor)
+            self.status_bar.showMessage("已退出细线绘制模式")
+
+            # 停止定时器
+            self.line_mode_timer.stop()
+
+            # 清理未完成的临时线条
+            if self.temp_line:
+                self.scene.removeItem(self.temp_line)
+                self.temp_line = None
+            self.line_start_point = None
+
+    def auto_exit_line_mode(self):
+        """1分钟无操作后自动退出画线模式"""
+        if self.line_mode:
+            # 取消画线模式的选中状态
+            self.line_action.setChecked(False)
+            # 调用切换方法退出画线模式
+            self.toggle_line_mode()
+            self.status_bar.showMessage("细线绘制模式已自动退出（1分钟无操作）")
+
     def undo_arrow_action(self):
         """撤销箭头操作"""
         if self.arrow_undo_stack.undo():
@@ -1108,7 +1270,7 @@ class ImageComposer(QMainWindow):
             self.status_bar.showMessage("没有可重做的箭头操作")
 
     def delete_selected(self):
-        """删除选中的图片或箭头"""
+        """删除选中的图片、箭头或线条"""
         selected_items = self.scene.selectedItems()
 
         if not selected_items:
@@ -1117,7 +1279,9 @@ class ImageComposer(QMainWindow):
 
         image_count = 0
         arrow_count = 0
+        line_count = 0
         arrows_to_delete = []
+        lines_to_delete = []
 
         for item in selected_items:
             if isinstance(item, DraggablePixmapItem):
@@ -1128,16 +1292,26 @@ class ImageComposer(QMainWindow):
                 arrow_count += 1
                 arrows_to_delete.append(item)
                 self.scene.removeItem(item)
+            elif isinstance(item, LineItem):
+                line_count += 1
+                lines_to_delete.append(item)
+                self.scene.removeItem(item)
 
         # 将箭头删除操作添加到撤销栈
         if arrows_to_delete:
             self.arrow_undo_stack.push_delete_arrows(self.scene, arrows_to_delete)
+
+        # 将线条删除操作添加到撤销栈
+        if lines_to_delete:
+            self.arrow_undo_stack.push_delete_arrows(self.scene, lines_to_delete)
 
         msg = []
         if image_count > 0:
             msg.append(f"{image_count} 张图片")
         if arrow_count > 0:
             msg.append(f"{arrow_count} 个箭头")
+        if line_count > 0:
+            msg.append(f"{line_count} 条线")
 
         self.status_bar.showMessage(f"已删除 {' 和 '.join(msg)}" if msg else "已删除项目")
 
@@ -1203,8 +1377,8 @@ class ImageComposer(QMainWindow):
         """导出合成后的图片（自动保存到指定路径）"""
         all_items = self.scene.items()
 
-        # 检查是否有图片或箭头
-        has_content = any(isinstance(item, (DraggablePixmapItem, ArrowItem)) for item in all_items)
+        # 检查是否有图片、箭头或线条
+        has_content = any(isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem)) for item in all_items)
 
         if not has_content:
             # 播放错误提示音
