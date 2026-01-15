@@ -19,6 +19,14 @@ try:
     SOUNDDEVICE_AVAILABLE = True
 except ImportError:
     SOUNDDEVICE_AVAILABLE = False
+
+# Windows 系统声音库
+try:
+    import winsound
+    WINSOUND_AVAILABLE = True
+except ImportError:
+    WINSOUND_AVAILABLE = False
+
 from datetime import datetime
 import ctypes
 
@@ -568,6 +576,7 @@ class ImageComposer(QMainWindow):
 
         # 初始化音频播放器
         self.media_player = QMediaPlayer()
+        self.media_player.setVolume(100)  # 设置音量为100%
         self.success_sound_path = os.path.join(os.path.dirname(__file__), "prompt_tone.mp3")
 
         # 查找笔记本扬声器设备ID
@@ -751,23 +760,47 @@ class ImageComposer(QMainWindow):
 
     def play_success_sound(self):
         """通过笔记本扬声器播放成功提示音"""
+        print(f"[DEBUG] 开始播放声音，文件路径: {self.success_sound_path}")
+
         if not os.path.exists(self.success_sound_path):
+            print(f"[DEBUG] 声音文件不存在！")
             QApplication.beep()
             return
 
+        print(f"[DEBUG] SOUNDDEVICE_AVAILABLE: {SOUNDDEVICE_AVAILABLE}")
+        print(f"[DEBUG] WINSOUND_AVAILABLE: {WINSOUND_AVAILABLE}")
+        print(f"[DEBUG] speaker_device_id: {self.speaker_device_id}")
+
+        # 方法1: 尝试使用 sounddevice（指定扬声器设备）
         if SOUNDDEVICE_AVAILABLE and self.speaker_device_id is not None:
             try:
-                # 使用 sounddevice 播放，指定输出设备
+                print(f"[DEBUG] 尝试使用 sounddevice 播放...")
                 data, samplerate = sf.read(self.success_sound_path)
                 sd.play(data, samplerate, device=self.speaker_device_id)
-                # 不等待播放完成，让程序继续运行
+                sd.wait()  # 等待播放完成
+                print(f"[DEBUG] sounddevice 播放成功")
                 return
             except Exception as e:
-                print(f"通过扬声器播放失败: {e}")
+                print(f"[DEBUG] sounddevice 播放失败: {e}")
 
-        # 回退到 QMediaPlayer（使用默认设备）
+        # 方法2: 尝试使用 winsound（Windows 系统自带，最可靠）
+        if WINSOUND_AVAILABLE:
+            try:
+                print(f"[DEBUG] 尝试使用 winsound 播放...")
+                # winsound 只支持 WAV 文件，需要转换 MP3
+                # 使用异步播放避免阻塞
+                winsound.PlaySound(self.success_sound_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                print(f"[DEBUG] winsound 播放成功")
+                return
+            except Exception as e:
+                print(f"[DEBUG] winsound 播放失败: {e}")
+
+        # 方法3: 回退到 QMediaPlayer（使用默认设备）
+        print(f"[DEBUG] 使用 QMediaPlayer 播放...")
+        print(f"[DEBUG] 当前音量: {self.media_player.volume()}")
         self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(self.success_sound_path)))
         self.media_player.play()
+        print(f"[DEBUG] QMediaPlayer.play() 已调用，状态: {self.media_player.state()}")
 
     def setup_global_hotkey(self):
         """设置全局快捷键"""
