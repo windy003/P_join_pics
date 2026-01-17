@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphics
                              QWidget, QHBoxLayout, QSystemTrayIcon, QMenu, QDialog,
                              QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox, QStyle,
                              QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsItemGroup,
-                             QListWidget, QListWidgetItem, QAbstractItemView, QCheckBox)
+                             QGraphicsRectItem, QListWidget, QListWidgetItem, QAbstractItemView, QCheckBox)
 from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject, QLineF, QTimer, QUrl
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon, QPen, QColor, QPolygonF, QBrush
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
@@ -344,7 +344,58 @@ class LineItem(QGraphicsItemGroup):
         if self.scene():
             max_z = 0
             for item in self.scene().items():
-                if isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem)):
+                if isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem)):
+                    max_z = max(max_z, item.zValue())
+            self.setZValue(max_z + 1)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.setCursor(Qt.OpenHandCursor)
+        super().mouseReleaseEvent(event)
+
+
+class RectItem(QGraphicsItemGroup):
+    """可拖拽的矩形框"""
+    def __init__(self, start_point, end_point):
+        super().__init__()
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+
+        self.start_point = start_point
+        self.end_point = end_point
+
+        # 矩形框样式 - 红色边框，无填充
+        self.pen = QPen(QColor(255, 0, 0), 3, Qt.SolidLine)
+
+        # 创建矩形
+        self.rect = QGraphicsRectItem()
+
+        self.addToGroup(self.rect)
+
+        self.update_rect()
+
+        self.setCursor(Qt.OpenHandCursor)
+
+    def update_rect(self):
+        """更新矩形的位置和大小"""
+        # 计算矩形区域（处理任意方向的拖拽）
+        x = min(self.start_point.x(), self.end_point.x())
+        y = min(self.start_point.y(), self.end_point.y())
+        width = abs(self.end_point.x() - self.start_point.x())
+        height = abs(self.end_point.y() - self.start_point.y())
+
+        self.rect.setRect(x, y, width, height)
+        self.rect.setPen(self.pen)
+        self.rect.setBrush(QBrush(Qt.transparent))  # 透明填充
+
+    def mousePressEvent(self, event):
+        self.setCursor(Qt.ClosedHandCursor)
+        # 选中时自动置顶
+        if self.scene():
+            max_z = 0
+            for item in self.scene().items():
+                if isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem)):
                     max_z = max(max_z, item.zValue())
             self.setZValue(max_z + 1)
         super().mousePressEvent(event)
@@ -408,7 +459,7 @@ class ArrowItem(QGraphicsItemGroup):
         if self.scene():
             max_z = 0
             for item in self.scene().items():
-                if isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem)):
+                if isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem)):
                     max_z = max(max_z, item.zValue())
             self.setZValue(max_z + 1)
         super().mousePressEvent(event)
@@ -493,6 +544,19 @@ class CustomGraphicsView(QGraphicsView):
             # 重置定时器（用户有操作）
             self.main_window.line_mode_timer.start(60000)
             event.accept()  # 标记事件已处理
+        elif self.main_window and self.main_window.rect_mode and event.button() == Qt.LeftButton:
+            # 矩形绘制模式
+            scene_pos = self.mapToScene(event.pos())
+            self.main_window.rect_start_point = scene_pos
+
+            # 创建临时矩形用于预览
+            pen = QPen(QColor(255, 0, 0, 150), 3, Qt.DashLine)
+            self.main_window.temp_rect = self.scene().addRect(
+                scene_pos.x(), scene_pos.y(), 0, 0, pen
+            )
+            # 重置定时器（用户有操作）
+            self.main_window.rect_mode_timer.start(60000)
+            event.accept()  # 标记事件已处理
         else:
             super().mousePressEvent(event)
 
@@ -516,6 +580,20 @@ class CustomGraphicsView(QGraphicsView):
                 if self.main_window.temp_line:
                     line = QLineF(self.main_window.line_start_point, scene_pos)
                     self.main_window.temp_line.setLine(line)
+            event.accept()  # 标记事件已处理
+        elif self.main_window and self.main_window.rect_mode:
+            # 强制保持十字光标
+            self.viewport().setCursor(Qt.CrossCursor)
+            if self.main_window.rect_start_point:
+                # 更新临时矩形
+                scene_pos = self.mapToScene(event.pos())
+                if self.main_window.temp_rect:
+                    start = self.main_window.rect_start_point
+                    x = min(start.x(), scene_pos.x())
+                    y = min(start.y(), scene_pos.y())
+                    width = abs(scene_pos.x() - start.x())
+                    height = abs(scene_pos.y() - start.y())
+                    self.main_window.temp_rect.setRect(x, y, width, height)
             event.accept()  # 标记事件已处理
         else:
             super().mouseMoveEvent(event)
@@ -556,6 +634,24 @@ class CustomGraphicsView(QGraphicsView):
                     self.main_window.arrow_undo_stack.push_add_arrow(self.scene(), line)
 
                 self.main_window.line_start_point = None
+            event.accept()  # 标记事件已处理
+        elif self.main_window and self.main_window.rect_mode and event.button() == Qt.LeftButton:
+            if self.main_window.rect_start_point:
+                scene_pos = self.mapToScene(event.pos())
+
+                # 移除临时矩形
+                if self.main_window.temp_rect:
+                    self.scene().removeItem(self.main_window.temp_rect)
+                    self.main_window.temp_rect = None
+
+                # 创建矩形框（只有当起点和终点不同时）
+                if (self.main_window.rect_start_point - scene_pos).manhattanLength() > 10:
+                    rect = RectItem(self.main_window.rect_start_point, scene_pos)
+                    self.scene().addItem(rect)
+                    # 添加到撤销栈
+                    self.main_window.arrow_undo_stack.push_add_arrow(self.scene(), rect)
+
+                self.main_window.rect_start_point = None
             event.accept()  # 标记事件已处理
         else:
             super().mouseReleaseEvent(event)
@@ -635,13 +731,23 @@ class ImageComposer(QMainWindow):
         self.line_mode_timer.timeout.connect(self.auto_exit_line_mode)
         self.line_mode_timer.setSingleShot(True)  # 只触发一次
 
+        # 矩形绘制模式
+        self.rect_mode = False
+        self.rect_start_point = None
+        self.temp_rect = None
+
+        # 矩形模式自动退出定时器（1分钟）
+        self.rect_mode_timer = QTimer()
+        self.rect_mode_timer.timeout.connect(self.auto_exit_rect_mode)
+        self.rect_mode_timer.setSingleShot(True)  # 只触发一次
+
         # 创建工具栏
         self.create_toolbar()
 
         # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+1/2/3/4 导入最近1/2/3/4张 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+L 画线 | Ctrl+Z 撤销 | Ctrl+Y 重做")
+        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+1/2/3/4 导入最近1/2/3/4张 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+L 画线 | Ctrl+R 画矩形 | Ctrl+Z 撤销 | Ctrl+Y 重做")
 
         # 图片计数
         self.image_count = 0
@@ -944,6 +1050,15 @@ class ImageComposer(QMainWindow):
         self.line_action.triggered.connect(self.toggle_line_mode)
         self.toolbar2.addAction(self.line_action)
         self.addAction(self.line_action)
+
+        # 画矩形模式
+        self.rect_action = QAction("⬜ 画矩形 (Ctrl+R)", self)
+        self.rect_action.setShortcut(QKeySequence("Ctrl+R"))
+        self.rect_action.setToolTip("开启/关闭矩形绘制模式 (Ctrl+R)")
+        self.rect_action.setCheckable(True)
+        self.rect_action.triggered.connect(self.toggle_rect_mode)
+        self.toolbar2.addAction(self.rect_action)
+        self.addAction(self.rect_action)
 
         self.toolbar2.addSeparator()
 
@@ -1288,6 +1403,53 @@ class ImageComposer(QMainWindow):
             self.toggle_line_mode()
             self.status_bar.showMessage("细线绘制模式已自动退出（1分钟无操作）")
 
+    def toggle_rect_mode(self):
+        """切换矩形绘制模式"""
+        self.rect_mode = self.rect_action.isChecked()
+
+        if self.rect_mode:
+            # 进入矩形模式，先退出箭头模式和画线模式
+            if self.arrow_mode:
+                self.arrow_action.setChecked(False)
+                self.toggle_arrow_mode()
+            if self.line_mode:
+                self.line_action.setChecked(False)
+                self.toggle_line_mode()
+
+            # 先设置为NoDrag模式，再设置光标
+            self.view.setDragMode(QGraphicsView.NoDrag)
+            # 强制设置视图和视口的光标为十字光标
+            self.view.setCursor(Qt.CrossCursor)
+            self.view.viewport().setCursor(Qt.CrossCursor)
+            self.view.viewport().setMouseTracking(True)
+            self.status_bar.showMessage("矩形绘制模式：按住鼠标左键拖动绘制矩形框 | 再次按 Ctrl+R 退出 | 1分钟无操作自动退出")
+            # 启动1分钟定时器
+            self.rect_mode_timer.start(60000)  # 60000毫秒 = 1分钟
+        else:
+            # 退出矩形模式
+            self.view.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.view.setCursor(Qt.ArrowCursor)
+            self.view.viewport().setCursor(Qt.ArrowCursor)
+            self.status_bar.showMessage("已退出矩形绘制模式")
+
+            # 停止定时器
+            self.rect_mode_timer.stop()
+
+            # 清理未完成的临时矩形
+            if self.temp_rect:
+                self.scene.removeItem(self.temp_rect)
+                self.temp_rect = None
+            self.rect_start_point = None
+
+    def auto_exit_rect_mode(self):
+        """1分钟无操作后自动退出矩形模式"""
+        if self.rect_mode:
+            # 取消矩形模式的选中状态
+            self.rect_action.setChecked(False)
+            # 调用切换方法退出矩形模式
+            self.toggle_rect_mode()
+            self.status_bar.showMessage("矩形绘制模式已自动退出（1分钟无操作）")
+
     def undo_arrow_action(self):
         """撤销箭头操作"""
         if self.arrow_undo_stack.undo():
@@ -1303,7 +1465,7 @@ class ImageComposer(QMainWindow):
             self.status_bar.showMessage("没有可重做的箭头操作")
 
     def delete_selected(self):
-        """删除选中的图片、箭头或线条"""
+        """删除选中的图片、箭头、线条或矩形框"""
         selected_items = self.scene.selectedItems()
 
         if not selected_items:
@@ -1313,8 +1475,10 @@ class ImageComposer(QMainWindow):
         image_count = 0
         arrow_count = 0
         line_count = 0
+        rect_count = 0
         arrows_to_delete = []
         lines_to_delete = []
+        rects_to_delete = []
 
         for item in selected_items:
             if isinstance(item, DraggablePixmapItem):
@@ -1329,6 +1493,10 @@ class ImageComposer(QMainWindow):
                 line_count += 1
                 lines_to_delete.append(item)
                 self.scene.removeItem(item)
+            elif isinstance(item, RectItem):
+                rect_count += 1
+                rects_to_delete.append(item)
+                self.scene.removeItem(item)
 
         # 将箭头删除操作添加到撤销栈
         if arrows_to_delete:
@@ -1338,6 +1506,10 @@ class ImageComposer(QMainWindow):
         if lines_to_delete:
             self.arrow_undo_stack.push_delete_arrows(self.scene, lines_to_delete)
 
+        # 将矩形框删除操作添加到撤销栈
+        if rects_to_delete:
+            self.arrow_undo_stack.push_delete_arrows(self.scene, rects_to_delete)
+
         msg = []
         if image_count > 0:
             msg.append(f"{image_count} 张图片")
@@ -1345,6 +1517,8 @@ class ImageComposer(QMainWindow):
             msg.append(f"{arrow_count} 个箭头")
         if line_count > 0:
             msg.append(f"{line_count} 条线")
+        if rect_count > 0:
+            msg.append(f"{rect_count} 个矩形框")
 
         self.status_bar.showMessage(f"已删除 {' 和 '.join(msg)}" if msg else "已删除项目")
 
@@ -1410,8 +1584,8 @@ class ImageComposer(QMainWindow):
         """导出合成后的图片（自动保存到指定路径）"""
         all_items = self.scene.items()
 
-        # 检查是否有图片、箭头或线条
-        has_content = any(isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem)) for item in all_items)
+        # 检查是否有图片、箭头、线条或矩形框
+        has_content = any(isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem)) for item in all_items)
 
         if not has_content:
             # 播放错误提示音
@@ -1461,9 +1635,10 @@ class ImageComposer(QMainWindow):
             height = int(scene_rect.height())
             self.status_bar.showMessage(f"已保存到: {file_path} ({width}x{height})")
 
-            # 导出成功后，删除画布中的所有图片并删除源文件
+            # 导出成功后，删除画布中的所有图片和形状，并删除源文件
             deleted_files = []
             failed_deletions = []
+            shape_count = 0
 
             for item in list(all_items):  # 使用list()创建副本，避免在迭代时修改
                 if isinstance(item, DraggablePixmapItem):
@@ -1478,11 +1653,20 @@ class ImageComposer(QMainWindow):
                     # 从场景中删除图片
                     self.scene.removeItem(item)
                     self.image_count -= 1
+                elif isinstance(item, (ArrowItem, LineItem, RectItem)):
+                    # 删除所有形状（箭头、线条、矩形框）
+                    self.scene.removeItem(item)
+                    shape_count += 1
+
+            # 清空撤销栈（因为所有形状都被删除了）
+            self.arrow_undo_stack.clear()
 
             # 更新状态栏消息，包含删除信息
             status_msg = f"已保存到: {file_path} ({width}x{height})"
             if deleted_files:
                 status_msg += f" | 已删除 {len(deleted_files)} 个源文件"
+            if shape_count > 0:
+                status_msg += f" | 已清除 {shape_count} 个形状"
             if failed_deletions:
                 status_msg += f" | {len(failed_deletions)} 个文件删除失败"
 
