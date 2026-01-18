@@ -11,22 +11,6 @@ from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon, QPen, QC
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PIL import Image
 import os
-
-# 音频设备选择相关
-try:
-    import sounddevice as sd
-    import soundfile as sf
-    SOUNDDEVICE_AVAILABLE = True
-except ImportError:
-    SOUNDDEVICE_AVAILABLE = False
-
-# Windows 系统声音库
-try:
-    import winsound
-    WINSOUND_AVAILABLE = True
-except ImportError:
-    WINSOUND_AVAILABLE = False
-
 from datetime import datetime
 import ctypes
 
@@ -675,9 +659,6 @@ class ImageComposer(QMainWindow):
         self.media_player.setVolume(100)  # 设置音量为100%
         self.success_sound_path = os.path.join(os.path.dirname(__file__), "prompt_tone.mp3")
 
-        # 查找笔记本扬声器设备ID
-        self.speaker_device_id = self.find_speaker_device()
-
         # 标记是否是第一次显示窗口
         self.first_show = True
 
@@ -834,79 +815,15 @@ class ImageComposer(QMainWindow):
             # 窗口当前隐藏，显示窗口
             self.show_window()
 
-    def find_speaker_device(self):
-        """查找笔记本扬声器设备"""
-        if not SOUNDDEVICE_AVAILABLE:
-            return None
-
-        try:
-            devices = sd.query_devices()
-            # 常见的扬声器设备名称关键词
-            speaker_keywords = ['realtek', '扬声器', 'speaker', 'speakers', 'synaptics', 'conexant', 'high definition audio']
-
-            for i, device in enumerate(devices):
-                # 只查找输出设备
-                if device['max_output_channels'] > 0:
-                    device_name = device['name'].lower()
-                    # 排除蓝牙设备
-                    if 'bluetooth' in device_name or 'bt' in device_name or 'wireless' in device_name:
-                        continue
-                    # 查找扬声器关键词
-                    for keyword in speaker_keywords:
-                        if keyword in device_name:
-                            print(f"找到扬声器设备: {device['name']} (ID: {i})")
-                            return i
-
-            # 如果没找到匹配的，返回None使用默认设备
-            print("未找到特定扬声器设备，将使用默认设备")
-            return None
-        except Exception as e:
-            print(f"查找音频设备失败: {e}")
-            return None
-
     def play_success_sound(self):
-        """通过笔记本扬声器播放成功提示音"""
-        print(f"[DEBUG] 开始播放声音，文件路径: {self.success_sound_path}")
-
+        """使用默认设备播放成功提示音"""
         if not os.path.exists(self.success_sound_path):
-            print(f"[DEBUG] 声音文件不存在！")
             QApplication.beep()
             return
 
-        print(f"[DEBUG] SOUNDDEVICE_AVAILABLE: {SOUNDDEVICE_AVAILABLE}")
-        print(f"[DEBUG] WINSOUND_AVAILABLE: {WINSOUND_AVAILABLE}")
-        print(f"[DEBUG] speaker_device_id: {self.speaker_device_id}")
-
-        # 方法1: 尝试使用 sounddevice（指定扬声器设备）
-        if SOUNDDEVICE_AVAILABLE and self.speaker_device_id is not None:
-            try:
-                print(f"[DEBUG] 尝试使用 sounddevice 播放...")
-                data, samplerate = sf.read(self.success_sound_path)
-                sd.play(data, samplerate, device=self.speaker_device_id)
-                sd.wait()  # 等待播放完成
-                print(f"[DEBUG] sounddevice 播放成功")
-                return
-            except Exception as e:
-                print(f"[DEBUG] sounddevice 播放失败: {e}")
-
-        # 方法2: 尝试使用 winsound（Windows 系统自带，最可靠）
-        if WINSOUND_AVAILABLE:
-            try:
-                print(f"[DEBUG] 尝试使用 winsound 播放...")
-                # winsound 只支持 WAV 文件，需要转换 MP3
-                # 使用异步播放避免阻塞
-                winsound.PlaySound(self.success_sound_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
-                print(f"[DEBUG] winsound 播放成功")
-                return
-            except Exception as e:
-                print(f"[DEBUG] winsound 播放失败: {e}")
-
-        # 方法3: 回退到 QMediaPlayer（使用默认设备）
-        print(f"[DEBUG] 使用 QMediaPlayer 播放...")
-        print(f"[DEBUG] 当前音量: {self.media_player.volume()}")
+        # 使用 QMediaPlayer 播放（默认设备）
         self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(self.success_sound_path)))
         self.media_player.play()
-        print(f"[DEBUG] QMediaPlayer.play() 已调用，状态: {self.media_player.state()}")
 
     def setup_global_hotkey(self):
         """设置全局快捷键"""
