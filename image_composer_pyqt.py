@@ -722,13 +722,16 @@ class ImageComposer(QMainWindow):
         self.rect_mode_timer.timeout.connect(self.auto_exit_rect_mode)
         self.rect_mode_timer.setSingleShot(True)  # 只触发一次
 
+        # 移动模式（框选和移动图片/形状）
+        self.move_mode = False
+
         # 创建工具栏
         self.create_toolbar()
 
         # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+1/2/3/4 导入最近1/2/3/4张 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+L 画线 | Ctrl+R 画矩形 | Ctrl+Z 撤销 | Ctrl+Y 重做")
+        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+1/2/3/4 导入最近1/2/3/4张 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+L 画线 | Ctrl+R 画矩形 | Ctrl+M 移动 | Ctrl+Z 撤销")
 
         # 图片计数
         self.image_count = 0
@@ -976,6 +979,15 @@ class ImageComposer(QMainWindow):
         self.rect_action.triggered.connect(self.toggle_rect_mode)
         self.toolbar2.addAction(self.rect_action)
         self.addAction(self.rect_action)
+
+        # 移动模式
+        self.move_action = QAction("✥ 移动 (Ctrl+M)", self)
+        self.move_action.setShortcut(QKeySequence("Ctrl+M"))
+        self.move_action.setToolTip("开启/关闭移动模式，可框选和移动图片/形状 (Ctrl+M)")
+        self.move_action.setCheckable(True)
+        self.move_action.triggered.connect(self.toggle_move_mode)
+        self.toolbar2.addAction(self.move_action)
+        self.addAction(self.move_action)
 
         self.toolbar2.addSeparator()
 
@@ -1237,10 +1249,13 @@ class ImageComposer(QMainWindow):
         self.arrow_mode = self.arrow_action.isChecked()
 
         if self.arrow_mode:
-            # 进入箭头模式，先退出画线模式
+            # 进入箭头模式，先退出其他模式
             if self.line_mode:
                 self.line_action.setChecked(False)
                 self.toggle_line_mode()
+            if self.move_mode:
+                self.move_action.setChecked(False)
+                self.toggle_move_mode()
 
             # 先设置为NoDrag模式，再设置光标
             self.view.setDragMode(QGraphicsView.NoDrag)
@@ -1281,10 +1296,13 @@ class ImageComposer(QMainWindow):
         self.line_mode = self.line_action.isChecked()
 
         if self.line_mode:
-            # 进入画线模式，先退出箭头模式
+            # 进入画线模式，先退出其他模式
             if self.arrow_mode:
                 self.arrow_action.setChecked(False)
                 self.toggle_arrow_mode()
+            if self.move_mode:
+                self.move_action.setChecked(False)
+                self.toggle_move_mode()
 
             # 先设置为NoDrag模式，再设置光标
             self.view.setDragMode(QGraphicsView.NoDrag)
@@ -1325,13 +1343,16 @@ class ImageComposer(QMainWindow):
         self.rect_mode = self.rect_action.isChecked()
 
         if self.rect_mode:
-            # 进入矩形模式，先退出箭头模式和画线模式
+            # 进入矩形模式，先退出其他模式
             if self.arrow_mode:
                 self.arrow_action.setChecked(False)
                 self.toggle_arrow_mode()
             if self.line_mode:
                 self.line_action.setChecked(False)
                 self.toggle_line_mode()
+            if self.move_mode:
+                self.move_action.setChecked(False)
+                self.toggle_move_mode()
 
             # 先设置为NoDrag模式，再设置光标
             self.view.setDragMode(QGraphicsView.NoDrag)
@@ -1366,6 +1387,34 @@ class ImageComposer(QMainWindow):
             # 调用切换方法退出矩形模式
             self.toggle_rect_mode()
             self.status_bar.showMessage("矩形绘制模式已自动退出（1分钟无操作）")
+
+    def toggle_move_mode(self):
+        """切换移动模式"""
+        self.move_mode = self.move_action.isChecked()
+
+        if self.move_mode:
+            # 进入移动模式，先退出其他绘制模式
+            if self.arrow_mode:
+                self.arrow_action.setChecked(False)
+                self.toggle_arrow_mode()
+            if self.line_mode:
+                self.line_action.setChecked(False)
+                self.toggle_line_mode()
+            if self.rect_mode:
+                self.rect_action.setChecked(False)
+                self.toggle_rect_mode()
+
+            # 设置为橡皮筋选择模式（可框选多个项目）
+            self.view.setDragMode(QGraphicsView.RubberBandDrag)
+            self.view.setCursor(Qt.ArrowCursor)
+            self.view.viewport().setCursor(Qt.ArrowCursor)
+            self.status_bar.showMessage("移动模式：可框选和移动图片/形状 | 再次按 Ctrl+M 退出")
+        else:
+            # 退出移动模式，恢复默认的拖拽画布模式
+            self.view.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.view.setCursor(Qt.ArrowCursor)
+            self.view.viewport().setCursor(Qt.ArrowCursor)
+            self.status_bar.showMessage("已退出移动模式")
 
     def undo_arrow_action(self):
         """撤销箭头操作"""
