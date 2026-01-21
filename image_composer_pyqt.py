@@ -5,9 +5,10 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphics
                              QWidget, QHBoxLayout, QSystemTrayIcon, QMenu, QDialog,
                              QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox, QStyle,
                              QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsItemGroup,
-                             QGraphicsRectItem, QListWidget, QListWidgetItem, QAbstractItemView, QCheckBox)
+                             QGraphicsRectItem, QListWidget, QListWidgetItem, QAbstractItemView,
+                             QCheckBox, QGraphicsTextItem, QInputDialog, QTextEdit)
 from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject, QLineF, QTimer, QUrl
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon, QPen, QColor, QPolygonF, QBrush
+from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon, QPen, QColor, QPolygonF, QBrush, QFont
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PIL import Image
 import os
@@ -250,6 +251,47 @@ class CustomImagePicker(QDialog):
         return self.selected_files
 
 
+class MultiLineTextDialog(QDialog):
+    """支持Ctrl+Enter确认的多行文本输入对话框"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("输入文本")
+        self.setModal(True)
+        self.resize(400, 200)
+
+        layout = QVBoxLayout()
+
+        # 提示标签
+        label = QLabel("请输入要添加的文字（Ctrl+Enter 确认）：")
+        layout.addWidget(label)
+
+        # 多行文本输入框
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlaceholderText("在此输入文字...")
+        self.text_edit.installEventFilter(self)
+        layout.addWidget(self.text_edit)
+
+        # 按钮
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.setLayout(layout)
+
+    def eventFilter(self, obj, event):
+        """事件过滤器，处理Ctrl+Enter快捷键"""
+        if obj == self.text_edit and event.type() == event.KeyPress:
+            if event.key() == Qt.Key_Return and event.modifiers() == Qt.ControlModifier:
+                self.accept()
+                return True
+        return super().eventFilter(obj, event)
+
+    def get_text(self):
+        """获取输入的文本"""
+        return self.text_edit.toPlainText()
+
+
 class HotkeySettingsDialog(QDialog):
     """快捷键设置对话框"""
     def __init__(self, current_hotkey, parent=None):
@@ -380,6 +422,56 @@ class RectItem(QGraphicsItemGroup):
             max_z = 0
             for item in self.scene().items():
                 if isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem)):
+                    max_z = max(max_z, item.zValue())
+            self.setZValue(max_z + 1)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.setCursor(Qt.OpenHandCursor)
+        super().mouseReleaseEvent(event)
+
+
+class TextItem(QGraphicsTextItem):
+    """可拖拽的红色文本"""
+    def __init__(self, text, position, font_size=24):
+        super().__init__(text)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+
+        # 设置红色字体
+        self.font_size = font_size
+        font = QFont("Microsoft YaHei", font_size)
+        font.setBold(True)
+        self.setFont(font)
+        self.setDefaultTextColor(QColor(255, 0, 0))
+
+        # 设置位置
+        self.setPos(position)
+
+        self.setCursor(Qt.OpenHandCursor)
+
+    def increase_font_size(self, delta=2):
+        """增大字体"""
+        self.font_size = min(200, self.font_size + delta)
+        font = self.font()
+        font.setPointSize(self.font_size)
+        self.setFont(font)
+
+    def decrease_font_size(self, delta=2):
+        """减小字体"""
+        self.font_size = max(8, self.font_size - delta)
+        font = self.font()
+        font.setPointSize(self.font_size)
+        self.setFont(font)
+
+    def mousePressEvent(self, event):
+        self.setCursor(Qt.ClosedHandCursor)
+        # 选中时自动置顶
+        if self.scene():
+            max_z = 0
+            for item in self.scene().items():
+                if isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem, TextItem)):
                     max_z = max(max_z, item.zValue())
             self.setZValue(max_z + 1)
         super().mousePressEvent(event)
@@ -541,6 +633,42 @@ class CustomGraphicsView(QGraphicsView):
             # 重置定时器（用户有操作）
             self.main_window.rect_mode_timer.start(60000)
             event.accept()  # 标记事件已处理
+        elif self.main_window and self.main_window.text_mode and event.button() == Qt.LeftButton:
+            # 文本输入模式
+            scene_pos = self.mapToScene(event.pos())
+
+            # 检查点击位置是否有现有的 TextItem
+            clicked_item = self.scene().itemAt(scene_pos, self.transform())
+            existing_text_item = None
+            if isinstance(clicked_item, TextItem):
+                existing_text_item = clicked_item
+
+            # 弹出多行文本输入对话框（支持Ctrl+Enter确认）
+            dialog = MultiLineTextDialog(self)
+            if existing_text_item:
+                # 编辑现有文本
+                dialog.setWindowTitle("编辑文本")
+                dialog.text_edit.setPlainText(existing_text_item.toPlainText())
+
+            if dialog.exec_() == QDialog.Accepted:
+                text = dialog.get_text()
+                if existing_text_item:
+                    # 更新现有文本
+                    if text.strip():
+                        existing_text_item.setPlainText(text.strip())
+                    else:
+                        # 如果文本为空，删除该文本项
+                        self.scene().removeItem(existing_text_item)
+                else:
+                    # 创建新文本项
+                    if text.strip():
+                        text_item = TextItem(text.strip(), scene_pos)
+                        self.scene().addItem(text_item)
+                        # 添加到撤销栈
+                        self.main_window.arrow_undo_stack.push_add_arrow(self.scene(), text_item)
+            # 重置定时器
+            self.main_window.text_mode_timer.start(60000)
+            event.accept()
         else:
             super().mousePressEvent(event)
 
@@ -725,13 +853,21 @@ class ImageComposer(QMainWindow):
         # 移动模式（框选和移动图片/形状）
         self.move_mode = False
 
+        # 文本绘制模式
+        self.text_mode = False
+
+        # 文本模式自动退出定时器（1分钟）
+        self.text_mode_timer = QTimer()
+        self.text_mode_timer.timeout.connect(self.auto_exit_text_mode)
+        self.text_mode_timer.setSingleShot(True)  # 只触发一次
+
         # 创建工具栏
         self.create_toolbar()
 
         # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+1/2/3/4 导入最近1/2/3/4张 | Ctrl+E/S 导出 | Ctrl+Shift+S 保存到桌面 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+A 画箭头 | Ctrl+L 画线 | Ctrl+R 画矩形 | Ctrl+M 移动")
+        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+E/S 导出 | Ctrl+Shift+S 桌面 | Ctrl+A 箭头 | Ctrl+L 线 | Ctrl+R 矩形 | Ctrl+T 文字 | Ctrl+M 移动 | Ctrl+Shift+</>缩放文字")
 
         # 图片计数
         self.image_count = 0
@@ -985,6 +1121,15 @@ class ImageComposer(QMainWindow):
         self.rect_action.triggered.connect(self.toggle_rect_mode)
         self.toolbar2.addAction(self.rect_action)
         self.addAction(self.rect_action)
+
+        # 文本模式
+        self.text_action = QAction("T 文本 (Ctrl+T)", self)
+        self.text_action.setShortcut(QKeySequence("Ctrl+T"))
+        self.text_action.setToolTip("开启/关闭文本输入模式 (Ctrl+T)")
+        self.text_action.setCheckable(True)
+        self.text_action.triggered.connect(self.toggle_text_mode)
+        self.toolbar2.addAction(self.text_action)
+        self.addAction(self.text_action)
 
         # 移动模式
         self.move_action = QAction("✥ 移动 (Ctrl+M)", self)
@@ -1259,6 +1404,12 @@ class ImageComposer(QMainWindow):
             if self.line_mode:
                 self.line_action.setChecked(False)
                 self.toggle_line_mode()
+            if self.rect_mode:
+                self.rect_action.setChecked(False)
+                self.toggle_rect_mode()
+            if self.text_mode:
+                self.text_action.setChecked(False)
+                self.toggle_text_mode()
             if self.move_mode:
                 self.move_action.setChecked(False)
                 self.toggle_move_mode()
@@ -1306,6 +1457,12 @@ class ImageComposer(QMainWindow):
             if self.arrow_mode:
                 self.arrow_action.setChecked(False)
                 self.toggle_arrow_mode()
+            if self.rect_mode:
+                self.rect_action.setChecked(False)
+                self.toggle_rect_mode()
+            if self.text_mode:
+                self.text_action.setChecked(False)
+                self.toggle_text_mode()
             if self.move_mode:
                 self.move_action.setChecked(False)
                 self.toggle_move_mode()
@@ -1356,6 +1513,9 @@ class ImageComposer(QMainWindow):
             if self.line_mode:
                 self.line_action.setChecked(False)
                 self.toggle_line_mode()
+            if self.text_mode:
+                self.text_action.setChecked(False)
+                self.toggle_text_mode()
             if self.move_mode:
                 self.move_action.setChecked(False)
                 self.toggle_move_mode()
@@ -1394,6 +1554,53 @@ class ImageComposer(QMainWindow):
             self.toggle_rect_mode()
             self.status_bar.showMessage("矩形绘制模式已自动退出（1分钟无操作）")
 
+    def toggle_text_mode(self):
+        """切换文本输入模式"""
+        self.text_mode = self.text_action.isChecked()
+
+        if self.text_mode:
+            # 进入文本模式，先退出其他模式
+            if self.arrow_mode:
+                self.arrow_action.setChecked(False)
+                self.toggle_arrow_mode()
+            if self.line_mode:
+                self.line_action.setChecked(False)
+                self.toggle_line_mode()
+            if self.rect_mode:
+                self.rect_action.setChecked(False)
+                self.toggle_rect_mode()
+            if self.move_mode:
+                self.move_action.setChecked(False)
+                self.toggle_move_mode()
+
+            # 先设置为NoDrag模式，再设置光标
+            self.view.setDragMode(QGraphicsView.NoDrag)
+            # 强制设置视图和视口的光标为十字光标
+            self.view.setCursor(Qt.CrossCursor)
+            self.view.viewport().setCursor(Qt.CrossCursor)
+            self.view.viewport().setMouseTracking(True)
+            self.status_bar.showMessage("文本输入模式：点击画布添加文字 | 再次按 Ctrl+T 退出 | 1分钟无操作自动退出")
+            # 启动1分钟定时器
+            self.text_mode_timer.start(60000)
+        else:
+            # 退出文本模式
+            self.view.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.view.setCursor(Qt.ArrowCursor)
+            self.view.viewport().setCursor(Qt.ArrowCursor)
+            self.status_bar.showMessage("已退出文本输入模式")
+
+            # 停止定时器
+            self.text_mode_timer.stop()
+
+    def auto_exit_text_mode(self):
+        """1分钟无操作后自动退出文本模式"""
+        if self.text_mode:
+            # 取消文本模式的选中状态
+            self.text_action.setChecked(False)
+            # 调用切换方法退出文本模式
+            self.toggle_text_mode()
+            self.status_bar.showMessage("文本输入模式已自动退出（1分钟无操作）")
+
     def toggle_move_mode(self):
         """切换移动模式"""
         self.move_mode = self.move_action.isChecked()
@@ -1409,12 +1616,15 @@ class ImageComposer(QMainWindow):
             if self.rect_mode:
                 self.rect_action.setChecked(False)
                 self.toggle_rect_mode()
+            if self.text_mode:
+                self.text_action.setChecked(False)
+                self.toggle_text_mode()
 
             # 设置为橡皮筋选择模式（可框选多个项目）
             self.view.setDragMode(QGraphicsView.RubberBandDrag)
             self.view.setCursor(Qt.ArrowCursor)
             self.view.viewport().setCursor(Qt.ArrowCursor)
-            self.status_bar.showMessage("移动模式：可框选和移动图片/形状 | 再次按 Ctrl+M 退出")
+            self.status_bar.showMessage("移动模式：可框选和移动图片/形状/文字 | 再次按 Ctrl+M 退出")
         else:
             # 退出移动模式，恢复默认的拖拽画布模式
             self.view.setDragMode(QGraphicsView.ScrollHandDrag)
@@ -1437,7 +1647,7 @@ class ImageComposer(QMainWindow):
             self.status_bar.showMessage("没有可重做的箭头操作")
 
     def delete_selected(self):
-        """删除选中的图片、箭头、线条或矩形框"""
+        """删除选中的图片、箭头、线条、矩形框或文字"""
         selected_items = self.scene.selectedItems()
 
         if not selected_items:
@@ -1448,9 +1658,11 @@ class ImageComposer(QMainWindow):
         arrow_count = 0
         line_count = 0
         rect_count = 0
+        text_count = 0
         arrows_to_delete = []
         lines_to_delete = []
         rects_to_delete = []
+        texts_to_delete = []
 
         for item in selected_items:
             if isinstance(item, DraggablePixmapItem):
@@ -1469,6 +1681,10 @@ class ImageComposer(QMainWindow):
                 rect_count += 1
                 rects_to_delete.append(item)
                 self.scene.removeItem(item)
+            elif isinstance(item, TextItem):
+                text_count += 1
+                texts_to_delete.append(item)
+                self.scene.removeItem(item)
 
         # 将箭头删除操作添加到撤销栈
         if arrows_to_delete:
@@ -1482,6 +1698,10 @@ class ImageComposer(QMainWindow):
         if rects_to_delete:
             self.arrow_undo_stack.push_delete_arrows(self.scene, rects_to_delete)
 
+        # 将文字删除操作添加到撤销栈
+        if texts_to_delete:
+            self.arrow_undo_stack.push_delete_arrows(self.scene, texts_to_delete)
+
         msg = []
         if image_count > 0:
             msg.append(f"{image_count} 张图片")
@@ -1491,6 +1711,8 @@ class ImageComposer(QMainWindow):
             msg.append(f"{line_count} 条线")
         if rect_count > 0:
             msg.append(f"{rect_count} 个矩形框")
+        if text_count > 0:
+            msg.append(f"{text_count} 个文字")
 
         self.status_bar.showMessage(f"已删除 {' 和 '.join(msg)}" if msg else "已删除项目")
 
@@ -1557,7 +1779,7 @@ class ImageComposer(QMainWindow):
         all_items = self.scene.items()
 
         # 检查是否有图片、箭头、线条或矩形框
-        has_content = any(isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem)) for item in all_items)
+        has_content = any(isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem, TextItem)) for item in all_items)
 
         if not has_content:
             # 播放错误提示音
@@ -1621,7 +1843,7 @@ class ImageComposer(QMainWindow):
                     # 从场景中删除图片
                     self.scene.removeItem(item)
                     self.image_count -= 1
-                elif isinstance(item, (ArrowItem, LineItem, RectItem)):
+                elif isinstance(item, (ArrowItem, LineItem, RectItem, TextItem)):
                     # 删除所有形状（箭头、线条、矩形框）
                     self.scene.removeItem(item)
                     shape_count += 1
@@ -1650,7 +1872,7 @@ class ImageComposer(QMainWindow):
         all_items = self.scene.items()
 
         # 检查是否有图片、箭头、线条或矩形框
-        has_content = any(isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem)) for item in all_items)
+        has_content = any(isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem, TextItem)) for item in all_items)
 
         if not has_content:
             # 播放错误提示音
@@ -1713,7 +1935,7 @@ class ImageComposer(QMainWindow):
                     # 从场景中删除图片
                     self.scene.removeItem(item)
                     self.image_count -= 1
-                elif isinstance(item, (ArrowItem, LineItem, RectItem)):
+                elif isinstance(item, (ArrowItem, LineItem, RectItem, TextItem)):
                     # 删除所有形状（箭头、线条、矩形框）
                     self.scene.removeItem(item)
                     shape_count += 1
@@ -1737,10 +1959,46 @@ class ImageComposer(QMainWindow):
             QApplication.beep()
             self.status_bar.showMessage(f"导出到桌面失败: {str(e)}")
 
+    def increase_text_font_size(self):
+        """放大选中文字的字体"""
+        selected_texts = [item for item in self.scene.selectedItems()
+                         if isinstance(item, TextItem)]
+        if not selected_texts:
+            self.status_bar.showMessage("请先选中要放大的文字")
+            return
+
+        for text_item in selected_texts:
+            text_item.increase_font_size()
+
+        self.status_bar.showMessage(f"已放大 {len(selected_texts)} 个文字的字体")
+
+    def decrease_text_font_size(self):
+        """缩小选中文字的字体"""
+        selected_texts = [item for item in self.scene.selectedItems()
+                         if isinstance(item, TextItem)]
+        if not selected_texts:
+            self.status_bar.showMessage("请先选中要缩小的文字")
+            return
+
+        for text_item in selected_texts:
+            text_item.decrease_font_size()
+
+        self.status_bar.showMessage(f"已缩小 {len(selected_texts)} 个文字的字体")
+
     def keyPressEvent(self, event):
         """键盘事件处理"""
         if event.key() == Qt.Key_Delete:
             self.delete_selected()
+        elif event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
+            # Ctrl+Shift 组合键
+            if event.key() == Qt.Key_Greater or event.key() == Qt.Key_Period:
+                # Ctrl+Shift+> 放大选中文字
+                self.increase_text_font_size()
+            elif event.key() == Qt.Key_Less or event.key() == Qt.Key_Comma:
+                # Ctrl+Shift+< 缩小选中文字
+                self.decrease_text_font_size()
+            else:
+                super().keyPressEvent(event)
         elif event.modifiers() == Qt.ControlModifier:
             if event.key() in (Qt.Key_Equal, Qt.Key_Plus):
                 self.zoom_in_selected()
