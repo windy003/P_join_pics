@@ -22,83 +22,167 @@ except ImportError:
     KEYBOARD_AVAILABLE = False
 
 
-# ===== 撤销/重做系统（仅支持箭头操作）=====
+# ===== 快照管理系统 =====
 
-class ArrowUndoStack:
-    """箭头操作的撤销栈管理器"""
+class SnapshotManager:
+    """快照管理器 - 保存和恢复画布状态"""
     def __init__(self):
-        self.undo_stack = []
-        self.redo_stack = []
+        self.snapshots = []  # 快照列表
+        self.max_snapshots = 50  # 最大快照数量
+
+    def save_snapshot(self, scene, image_items_data):
+        """
+        保存当前画布状态为快照
+        scene: QGraphicsScene
+        image_items_data: 图片项的原始数据列表
+        """
+        snapshot = {
+            'images': [],
+            'arrows': [],
+            'lines': [],
+            'rects': [],
+            'texts': []
+        }
+
+        for item in scene.items():
+            if isinstance(item, DraggablePixmapItem):
+                snapshot['images'].append({
+                    'pixmap': item.pixmap().copy(),
+                    'original_image': item.original_image.copy() if item.original_image else None,
+                    'pos': QPointF(item.pos()),
+                    'z_value': item.zValue(),
+                    'user_scale': item.user_scale,
+                    'file_path': item.file_path
+                })
+            elif isinstance(item, ArrowItem):
+                snapshot['arrows'].append({
+                    'start': QPointF(item.start_point),
+                    'end': QPointF(item.end_point),
+                    'pos': QPointF(item.pos()),
+                    'z_value': item.zValue()
+                })
+            elif isinstance(item, LineItem):
+                snapshot['lines'].append({
+                    'start': QPointF(item.start_point),
+                    'end': QPointF(item.end_point),
+                    'pos': QPointF(item.pos()),
+                    'z_value': item.zValue()
+                })
+            elif isinstance(item, RectItem):
+                snapshot['rects'].append({
+                    'start': QPointF(item.start_point),
+                    'end': QPointF(item.end_point),
+                    'pos': QPointF(item.pos()),
+                    'z_value': item.zValue()
+                })
+            elif isinstance(item, TextItem):
+                snapshot['texts'].append({
+                    'text': item.toPlainText(),
+                    'pos': QPointF(item.pos()),
+                    'z_value': item.zValue(),
+                    'font_size': item.font_size
+                })
+
+        self.snapshots.append(snapshot)
+
+        # 限制快照数量
+        if len(self.snapshots) > self.max_snapshots:
+            self.snapshots.pop(0)
+
+        return len(self.snapshots)
+
+    def restore_snapshot(self, scene):
+        """恢复到上一个快照状态"""
+        if len(self.snapshots) < 2:
+            return False, 0
+
+        # 移除当前状态（最后一个快照）
+        self.snapshots.pop()
+
+        # 获取要恢复的快照
+        snapshot = self.snapshots[-1]
+
+        # 清空当前场景
+        scene.clear()
+
+        # 恢复图片
+        for img_data in snapshot['images']:
+            item = DraggablePixmapItem(
+                img_data['pixmap'],
+                img_data['original_image'],
+                file_path=img_data['file_path']
+            )
+            item.user_scale = img_data['user_scale']
+            item.setScale(img_data['user_scale'])
+            item.setPos(img_data['pos'])
+            item.setZValue(img_data['z_value'])
+            scene.addItem(item)
+
+        # 恢复箭头
+        for arrow_data in snapshot['arrows']:
+            arrow = ArrowItem(arrow_data['start'], arrow_data['end'])
+            arrow.setPos(arrow_data['pos'])
+            arrow.setZValue(arrow_data['z_value'])
+            scene.addItem(arrow)
+
+        # 恢复线条
+        for line_data in snapshot['lines']:
+            line = LineItem(line_data['start'], line_data['end'])
+            line.setPos(line_data['pos'])
+            line.setZValue(line_data['z_value'])
+            scene.addItem(line)
+
+        # 恢复矩形
+        for rect_data in snapshot['rects']:
+            rect = RectItem(rect_data['start'], rect_data['end'])
+            rect.setPos(rect_data['pos'])
+            rect.setZValue(rect_data['z_value'])
+            scene.addItem(rect)
+
+        # 恢复文字
+        for text_data in snapshot['texts']:
+            text = TextItem(text_data['text'], text_data['pos'], text_data['font_size'])
+            text.setZValue(text_data['z_value'])
+            scene.addItem(text)
+
+        return True, len(self.snapshots)
+
+    def get_snapshot_count(self):
+        """获取当前快照数量"""
+        return len(self.snapshots)
+
+    def clear(self):
+        """清空所有快照"""
+        self.snapshots.clear()
+
+    def has_snapshots(self):
+        """是否有快照可以撤销"""
+        return len(self.snapshots) > 1
+
+
+# 保留旧的类名以兼容
+class ArrowUndoStack:
+    """兼容旧代码的空实现"""
+    def __init__(self):
+        pass
 
     def push_add_arrow(self, scene, arrow):
-        """添加箭头到撤销栈"""
-        self.undo_stack.append({'action': 'add', 'arrow': arrow, 'scene': scene})
-        # 执行新命令后清空重做栈
-        self.redo_stack.clear()
+        pass
 
     def push_delete_arrows(self, scene, arrows):
-        """删除箭头到撤销栈"""
-        # 保存箭头的状态
-        arrow_states = []
-        for arrow in arrows:
-            arrow_states.append({
-                'arrow': arrow,
-                'pos': arrow.pos(),
-                'z_value': arrow.zValue()
-            })
-        self.undo_stack.append({'action': 'delete', 'arrows': arrow_states, 'scene': scene})
-        # 执行新命令后清空重做栈
-        self.redo_stack.clear()
+        pass
 
     def undo(self):
-        """撤销最后一个命令"""
-        if not self.undo_stack:
-            return False
-
-        command = self.undo_stack.pop()
-
-        if command['action'] == 'add':
-            # 撤销添加 = 移除箭头
-            command['scene'].removeItem(command['arrow'])
-            self.redo_stack.append(command)
-        elif command['action'] == 'delete':
-            # 撤销删除 = 恢复箭头
-            for state in command['arrows']:
-                arrow = state['arrow']
-                command['scene'].addItem(arrow)
-                arrow.setPos(state['pos'])
-                arrow.setZValue(state['z_value'])
-            self.redo_stack.append(command)
-
-        return True
+        return False
 
     def redo(self):
-        """重做最后一个撤销的命令"""
-        if not self.redo_stack:
-            return False
-
-        command = self.redo_stack.pop()
-
-        if command['action'] == 'add':
-            # 重做添加 = 添加箭头
-            command['scene'].addItem(command['arrow'])
-            command['arrow'].setPos(command['arrow'].pos())
-            self.undo_stack.append(command)
-        elif command['action'] == 'delete':
-            # 重做删除 = 移除箭头
-            for state in command['arrows']:
-                command['scene'].removeItem(state['arrow'])
-            self.undo_stack.append(command)
-
-        return True
+        return False
 
     def can_undo(self):
-        """是否可以撤销"""
-        return len(self.undo_stack) > 0
+        return False
 
     def can_redo(self):
-        """是否可以重做"""
-        return len(self.redo_stack) > 0
+        return False
 
     def clear(self):
         """清空撤销栈"""
@@ -637,14 +721,15 @@ class CustomGraphicsView(QGraphicsView):
             # 文本输入模式
             scene_pos = self.mapToScene(event.pos())
 
-            # 检查点击位置是否有现有的 TextItem
-            clicked_item = self.scene().itemAt(scene_pos, self.transform())
+            # 检查点击位置是否有现有的 TextItem（需要临时启用项目来检测）
             existing_text_item = None
-            if isinstance(clicked_item, TextItem):
-                existing_text_item = clicked_item
+            for item in self.scene().items(scene_pos):
+                if isinstance(item, TextItem):
+                    existing_text_item = item
+                    break
 
             # 弹出多行文本输入对话框（支持Ctrl+Enter确认）
-            dialog = MultiLineTextDialog(self)
+            dialog = MultiLineTextDialog(self.main_window)
             if existing_text_item:
                 # 编辑现有文本
                 dialog.setWindowTitle("编辑文本")
@@ -664,8 +749,7 @@ class CustomGraphicsView(QGraphicsView):
                     if text.strip():
                         text_item = TextItem(text.strip(), scene_pos)
                         self.scene().addItem(text_item)
-                        # 添加到撤销栈
-                        self.main_window.arrow_undo_stack.push_add_arrow(self.scene(), text_item)
+
             # 重置定时器
             self.main_window.text_mode_timer.start(60000)
             event.accept()
@@ -782,6 +866,9 @@ class ImageComposer(QMainWindow):
         # 创建箭头操作的撤销栈
         self.arrow_undo_stack = ArrowUndoStack()
 
+        # 创建快照管理器
+        self.snapshot_manager = SnapshotManager()
+
         # 初始化音频播放器
         self.media_player = QMediaPlayer()
         self.media_player.setVolume(100)  # 设置音量为100%
@@ -867,7 +954,7 @@ class ImageComposer(QMainWindow):
         # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+E/S 导出 | Ctrl+Shift+S 桌面 | Ctrl+A 箭头 | Ctrl+L 线 | Ctrl+R 矩形 | Ctrl+T 文字 | Ctrl+M 移动 | Ctrl+Shift+</>缩放文字")
+        self.status_bar.showMessage("就绪 | Ctrl+S 合并 | Ctrl+Z 撤销 | Ctrl+O 导入 | Alt+S 导出 | Ctrl+A 箭头 | Ctrl+L 线 | Ctrl+R 矩形 | Ctrl+T 文字 | Ctrl+M 移动")
 
         # 图片计数
         self.image_count = 0
@@ -1046,19 +1133,13 @@ class ImageComposer(QMainWindow):
         self.toolbar1.addAction(import_action)
         self.addAction(import_action)  # 同时添加到主窗口，确保快捷键始终有效
 
-        # 导出图片 - 添加Ctrl+E快捷键
-        export_action = QAction("💾 导出 (Ctrl+E)", self)
-        export_action.setShortcut(QKeySequence("Ctrl+E"))
-        export_action.setToolTip("导出图片 (Ctrl+E 或 Ctrl+S)")
+        # 导出图片 - Alt+S 最终保存
+        export_action = QAction("💾 导出 (Alt+S)", self)
+        export_action.setShortcut(QKeySequence("Alt+S"))
+        export_action.setToolTip("导出图片到文件 (Alt+S)")
         export_action.triggered.connect(self.export_image)
         self.toolbar1.addAction(export_action)
         self.addAction(export_action)  # 同时添加到主窗口
-
-        # 额外绑定Ctrl+S快捷键（保持兼容性）
-        export_action2 = QAction(self)
-        export_action2.setShortcut(QKeySequence("Ctrl+S"))
-        export_action2.triggered.connect(self.export_image)
-        self.addAction(export_action2)
 
         # 绑定Ctrl+Shift+S快捷键（保存到桌面）
         export_desktop_action = QAction(self)
@@ -1142,27 +1223,21 @@ class ImageComposer(QMainWindow):
 
         self.toolbar2.addSeparator()
 
-        # 撤销箭头操作
+        # 合并图层 - Ctrl+S 临时合并
+        snapshot_action = QAction("📸 合并 (Ctrl+S)", self)
+        snapshot_action.setShortcut(QKeySequence("Ctrl+S"))
+        snapshot_action.setToolTip("合并所有内容为一张图片 (Ctrl+S)")
+        snapshot_action.triggered.connect(self.save_snapshot)
+        self.toolbar2.addAction(snapshot_action)
+        self.addAction(snapshot_action)
+
+        # 撤销到上一个状态
         undo_action = QAction("↶ 撤销 (Ctrl+Z)", self)
         undo_action.setShortcut(QKeySequence("Ctrl+Z"))
-        undo_action.setToolTip("撤销上一个箭头操作 (Ctrl+Z)")
-        undo_action.triggered.connect(self.undo_arrow_action)
+        undo_action.setToolTip("撤销到合并前的状态 (Ctrl+Z)")
+        undo_action.triggered.connect(self.undo_snapshot)
         self.toolbar2.addAction(undo_action)
         self.addAction(undo_action)
-
-        # 重做箭头操作 - 支持 Ctrl+Y 和 Ctrl+Shift+Z
-        redo_action = QAction("↷ 重做 (Ctrl+Y)", self)
-        redo_action.setShortcut(QKeySequence("Ctrl+Y"))
-        redo_action.setToolTip("重做箭头操作 (Ctrl+Y 或 Ctrl+Shift+Z)")
-        redo_action.triggered.connect(self.redo_arrow_action)
-        self.toolbar2.addAction(redo_action)
-        self.addAction(redo_action)
-
-        # 额外绑定 Ctrl+Shift+Z 快捷键
-        redo_action2 = QAction(self)
-        redo_action2.setShortcut(QKeySequence("Ctrl+Shift+Z"))
-        redo_action2.triggered.connect(self.redo_arrow_action)
-        self.addAction(redo_action2)
 
         self.toolbar2.addSeparator()
 
@@ -1395,6 +1470,23 @@ class ImageComposer(QMainWindow):
         # 转换为QPixmap
         return QPixmap.fromImage(qimage)
 
+    def set_items_interactive(self, interactive):
+        """设置场景中所有项目的交互性
+
+        在绘图模式下禁用所有项目交互，防止鼠标事件被拦截
+        """
+        for item in self.scene.items():
+            # 禁用/启用所有类型的项目
+            if interactive:
+                # 恢复交互
+                item.setEnabled(True)
+                if isinstance(item, DraggablePixmapItem):
+                    item.setFlag(QGraphicsItem.ItemIsMovable, True)
+                    item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+            else:
+                # 禁用交互
+                item.setEnabled(False)
+
     def toggle_arrow_mode(self):
         """切换箭头绘制模式"""
         self.arrow_mode = self.arrow_action.isChecked()
@@ -1414,6 +1506,9 @@ class ImageComposer(QMainWindow):
                 self.move_action.setChecked(False)
                 self.toggle_move_mode()
 
+            # 禁用图片交互，防止鼠标事件被拦截
+            self.set_items_interactive(False)
+
             # 先设置为NoDrag模式，再设置光标
             self.view.setDragMode(QGraphicsView.NoDrag)
             # 强制设置视图和视口的光标为十字光标
@@ -1425,6 +1520,7 @@ class ImageComposer(QMainWindow):
             self.arrow_mode_timer.start(60000)  # 60000毫秒 = 1分钟
         else:
             # 退出箭头模式
+            self.set_items_interactive(True)  # 恢复图片交互
             self.view.setDragMode(QGraphicsView.ScrollHandDrag)
             self.view.setCursor(Qt.ArrowCursor)
             self.view.viewport().setCursor(Qt.ArrowCursor)
@@ -1467,6 +1563,9 @@ class ImageComposer(QMainWindow):
                 self.move_action.setChecked(False)
                 self.toggle_move_mode()
 
+            # 禁用图片交互，防止鼠标事件被拦截
+            self.set_items_interactive(False)
+
             # 先设置为NoDrag模式，再设置光标
             self.view.setDragMode(QGraphicsView.NoDrag)
             # 强制设置视图和视口的光标为十字光标
@@ -1478,6 +1577,7 @@ class ImageComposer(QMainWindow):
             self.line_mode_timer.start(60000)  # 60000毫秒 = 1分钟
         else:
             # 退出画线模式
+            self.set_items_interactive(True)  # 恢复图片交互
             self.view.setDragMode(QGraphicsView.ScrollHandDrag)
             self.view.setCursor(Qt.ArrowCursor)
             self.view.viewport().setCursor(Qt.ArrowCursor)
@@ -1520,6 +1620,9 @@ class ImageComposer(QMainWindow):
                 self.move_action.setChecked(False)
                 self.toggle_move_mode()
 
+            # 禁用图片交互，防止鼠标事件被拦截
+            self.set_items_interactive(False)
+
             # 先设置为NoDrag模式，再设置光标
             self.view.setDragMode(QGraphicsView.NoDrag)
             # 强制设置视图和视口的光标为十字光标
@@ -1531,6 +1634,7 @@ class ImageComposer(QMainWindow):
             self.rect_mode_timer.start(60000)  # 60000毫秒 = 1分钟
         else:
             # 退出矩形模式
+            self.set_items_interactive(True)  # 恢复图片交互
             self.view.setDragMode(QGraphicsView.ScrollHandDrag)
             self.view.setCursor(Qt.ArrowCursor)
             self.view.viewport().setCursor(Qt.ArrowCursor)
@@ -1573,6 +1677,9 @@ class ImageComposer(QMainWindow):
                 self.move_action.setChecked(False)
                 self.toggle_move_mode()
 
+            # 禁用图片交互，防止鼠标事件被拦截
+            self.set_items_interactive(False)
+
             # 先设置为NoDrag模式，再设置光标
             self.view.setDragMode(QGraphicsView.NoDrag)
             # 强制设置视图和视口的光标为十字光标
@@ -1584,6 +1691,7 @@ class ImageComposer(QMainWindow):
             self.text_mode_timer.start(60000)
         else:
             # 退出文本模式
+            self.set_items_interactive(True)  # 恢复图片交互
             self.view.setDragMode(QGraphicsView.ScrollHandDrag)
             self.view.setCursor(Qt.ArrowCursor)
             self.view.viewport().setCursor(Qt.ArrowCursor)
@@ -1632,19 +1740,61 @@ class ImageComposer(QMainWindow):
             self.view.viewport().setCursor(Qt.ArrowCursor)
             self.status_bar.showMessage("已退出移动模式")
 
-    def undo_arrow_action(self):
-        """撤销箭头操作"""
-        if self.arrow_undo_stack.undo():
-            self.status_bar.showMessage("已撤销箭头操作")
-        else:
-            self.status_bar.showMessage("没有可撤销的箭头操作")
+    def save_snapshot(self):
+        """合并当前画布内容为一张图片 (Ctrl+S)"""
+        if not self.scene.items():
+            self.status_bar.showMessage("画布为空，无法合并")
+            return
 
-    def redo_arrow_action(self):
-        """重做箭头操作"""
-        if self.arrow_undo_stack.redo():
-            self.status_bar.showMessage("已重做箭头操作")
+        # 先保存当前状态到快照（用于撤销）
+        count = self.snapshot_manager.save_snapshot(self.scene, None)
+
+        # 获取所有内容的边界
+        items_rect = self.scene.itemsBoundingRect()
+        if items_rect.isEmpty():
+            self.status_bar.showMessage("画布为空，无法合并")
+            return
+
+        # 创建一张新图片，包含所有内容
+        width = int(items_rect.width())
+        height = int(items_rect.height())
+
+        # 创建 QImage 来渲染场景
+        image = QImage(width, height, QImage.Format_ARGB32)
+        image.fill(Qt.white)  # 白色背景
+
+        # 用 QPainter 渲染场景到图片
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        self.scene.render(painter, QRectF(0, 0, width, height), items_rect)
+        painter.end()
+
+        # 清空场景
+        self.scene.clear()
+
+        # 将合并后的图片作为新的可编辑图片添加到场景
+        pixmap = QPixmap.fromImage(image)
+        merged_item = DraggablePixmapItem(pixmap, image, file_path=None)
+        merged_item.setPos(items_rect.topLeft())
+        self.scene.addItem(merged_item)
+
+        self.image_count = 1
+        self.play_success_sound()
+        self.status_bar.showMessage(f"✓ 已合并为一张图片 (快照 #{count}) | 按 Ctrl+Z 可撤销")
+
+    def undo_snapshot(self):
+        """撤销到合并前的状态 (Ctrl+Z)"""
+        if not self.snapshot_manager.has_snapshots():
+            self.status_bar.showMessage("没有可撤销的操作，请先按 Ctrl+S 合并")
+            return
+
+        success, remaining = self.snapshot_manager.restore_snapshot(self.scene)
+        if success:
+            self.play_success_sound()
+            self.status_bar.showMessage(f"✓ 已撤销到合并前的状态 | 剩余 {remaining} 个可撤销状态")
         else:
-            self.status_bar.showMessage("没有可重做的箭头操作")
+            self.status_bar.showMessage("没有更多可撤销的操作")
 
     def delete_selected(self):
         """删除选中的图片、箭头、线条、矩形框或文字"""
