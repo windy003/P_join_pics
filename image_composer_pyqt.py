@@ -731,7 +731,7 @@ class ImageComposer(QMainWindow):
         # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+1/2/3/4 导入最近1/2/3/4张 | Ctrl+E/S 导出 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+Del 清空 | Ctrl+A 画箭头 | Ctrl+L 画线 | Ctrl+R 画矩形 | Ctrl+M 移动 | Ctrl+Z 撤销")
+        self.status_bar.showMessage("就绪 | Ctrl+O 导入 | Ctrl+1/2/3/4 导入最近1/2/3/4张 | Ctrl+E/S 导出 | Ctrl+Shift+S 保存到桌面 | Ctrl+=/- 缩放 | Delete 删除 | Ctrl+A 画箭头 | Ctrl+L 画线 | Ctrl+R 画矩形 | Ctrl+M 移动")
 
         # 图片计数
         self.image_count = 0
@@ -923,6 +923,12 @@ class ImageComposer(QMainWindow):
         export_action2.setShortcut(QKeySequence("Ctrl+S"))
         export_action2.triggered.connect(self.export_image)
         self.addAction(export_action2)
+
+        # 绑定Ctrl+Shift+S快捷键（保存到桌面）
+        export_desktop_action = QAction(self)
+        export_desktop_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        export_desktop_action.triggered.connect(self.export_to_desktop)
+        self.addAction(export_desktop_action)
 
         self.toolbar1.addSeparator()
 
@@ -1571,12 +1577,8 @@ class ImageComposer(QMainWindow):
             timestamp = datetime.now().strftime("%Y-%m-%d %H %M %S")
             file_path = os.path.join(save_dir, f"{timestamp}.png")
 
-            # 获取场景中所有项目的边界框
+            # 获取场景中所有项目的边界框（不添加边距）
             scene_rect = self.scene.itemsBoundingRect()
-
-            # 添加边距
-            padding = 50
-            scene_rect.adjust(-padding, -padding, padding, padding)
 
             # 创建QImage用于渲染
             image = QImage(int(scene_rect.width()), int(scene_rect.height()),
@@ -1642,6 +1644,98 @@ class ImageComposer(QMainWindow):
             # 播放错误提示音
             QApplication.beep()
             self.status_bar.showMessage(f"导出失败: {str(e)}")
+
+    def export_to_desktop(self):
+        """导出合成后的图片到桌面（不删除源文件和画布内容）"""
+        all_items = self.scene.items()
+
+        # 检查是否有图片、箭头、线条或矩形框
+        has_content = any(isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem)) for item in all_items)
+
+        if not has_content:
+            # 播放错误提示音
+            QApplication.beep()
+            self.status_bar.showMessage("画布上没有内容可导出！")
+            return
+
+        try:
+            # 获取桌面路径 (OneDrive\Desktop)
+            user_home = os.path.expanduser("~")
+            desktop_path = os.path.join(user_home, "OneDrive", "Desktop")
+
+            # 如果目录不存在，创建它
+            os.makedirs(desktop_path, exist_ok=True)
+
+            # 生成时间戳文件名
+            timestamp = datetime.now().strftime("%Y-%m-%d %H %M %S")
+            file_path = os.path.join(desktop_path, f"{timestamp}.png")
+
+            # 获取场景中所有项目的边界框（不添加边距）
+            scene_rect = self.scene.itemsBoundingRect()
+
+            # 创建QImage用于渲染
+            image = QImage(int(scene_rect.width()), int(scene_rect.height()),
+                          QImage.Format_ARGB32)
+            image.fill(Qt.white)
+
+            # 创建QPainter并渲染场景
+            painter = QPainter(image)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            self.scene.render(painter, QRectF(), scene_rect)
+            painter.end()
+
+            # 保存图片
+            image.save(file_path, 'PNG')
+
+            # 播放成功提示音
+            self.play_success_sound()
+
+            # 更新状态栏，显示完整路径
+            width = int(scene_rect.width())
+            height = int(scene_rect.height())
+
+            # 导出成功后，删除画布中的所有图片和形状，并删除源文件
+            deleted_files = []
+            failed_deletions = []
+            shape_count = 0
+
+            for item in list(all_items):  # 使用list()创建副本，避免在迭代时修改
+                if isinstance(item, DraggablePixmapItem):
+                    # 尝试删除源文件
+                    if item.file_path and os.path.exists(item.file_path):
+                        try:
+                            os.remove(item.file_path)
+                            deleted_files.append(os.path.basename(item.file_path))
+                        except Exception as e:
+                            failed_deletions.append(f"{os.path.basename(item.file_path)}: {str(e)}")
+
+                    # 从场景中删除图片
+                    self.scene.removeItem(item)
+                    self.image_count -= 1
+                elif isinstance(item, (ArrowItem, LineItem, RectItem)):
+                    # 删除所有形状（箭头、线条、矩形框）
+                    self.scene.removeItem(item)
+                    shape_count += 1
+
+            # 清空撤销栈（因为所有形状都被删除了）
+            self.arrow_undo_stack.clear()
+
+            # 更新状态栏消息，包含删除信息
+            status_msg = f"已保存到桌面: {file_path} ({width}x{height})"
+            if deleted_files:
+                status_msg += f" | 已删除 {len(deleted_files)} 个源文件"
+            if shape_count > 0:
+                status_msg += f" | 已清除 {shape_count} 个形状"
+            if failed_deletions:
+                status_msg += f" | {len(failed_deletions)} 个文件删除失败"
+
+            self.status_bar.showMessage(status_msg)
+
+        except Exception as e:
+            # 播放错误提示音
+            QApplication.beep()
+            self.status_bar.showMessage(f"导出到桌面失败: {str(e)}")
 
     def keyPressEvent(self, event):
         """键盘事件处理"""
