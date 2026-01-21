@@ -1471,21 +1471,12 @@ class ImageComposer(QMainWindow):
         return QPixmap.fromImage(qimage)
 
     def set_items_interactive(self, interactive):
-        """设置场景中所有项目的交互性
+        """设置场景交互性
 
-        在绘图模式下禁用所有项目交互，防止鼠标事件被拦截
+        在绘图模式下禁用场景交互，防止鼠标事件被项目拦截
         """
-        for item in self.scene.items():
-            # 禁用/启用所有类型的项目
-            if interactive:
-                # 恢复交互
-                item.setEnabled(True)
-                if isinstance(item, DraggablePixmapItem):
-                    item.setFlag(QGraphicsItem.ItemIsMovable, True)
-                    item.setFlag(QGraphicsItem.ItemIsSelectable, True)
-            else:
-                # 禁用交互
-                item.setEnabled(False)
+        # 使用 view.setInteractive 来完全禁用/启用场景交互
+        self.view.setInteractive(interactive)
 
     def toggle_arrow_mode(self):
         """切换箭头绘制模式"""
