@@ -1403,6 +1403,8 @@ class ImageComposer(QMainWindow):
                     f"无法加载图片 {os.path.basename(file_path)}:\n{str(e)}"
                 )
 
+        # 更新场景矩形以适应导入的图片
+        self.update_scene_rect()
         self.status_bar.showMessage(f"已导入 {len(file_paths)} 张图片，画布共有 {self.image_count} 张图片")
 
     def import_recent_images(self, count):
@@ -1475,6 +1477,8 @@ class ImageComposer(QMainWindow):
                 print(f"无法加载图片 {os.path.basename(file_path)}: {str(e)}")
                 continue
 
+        # 更新场景矩形以适应导入的图片
+        self.update_scene_rect()
         self.status_bar.showMessage(f"已自动导入最近的 {imported_count} 张图片，画布共有 {self.image_count} 张图片")
 
     def pil_to_qpixmap(self, pil_image):
@@ -1499,6 +1503,15 @@ class ImageComposer(QMainWindow):
         """
         # 使用 view.setInteractive 来完全禁用/启用场景交互
         self.view.setInteractive(interactive)
+
+    def update_scene_rect(self):
+        """更新场景矩形以适应所有项目，并添加边距"""
+        items_rect = self.scene.itemsBoundingRect()
+        if not items_rect.isEmpty():
+            # 添加边距，确保放大后有足够空间
+            margin = 2000
+            expanded_rect = items_rect.adjusted(-margin, -margin, margin, margin)
+            self.scene.setSceneRect(expanded_rect)
 
     def toggle_arrow_mode(self):
         """切换箭头绘制模式"""
@@ -1891,6 +1904,8 @@ class ImageComposer(QMainWindow):
         for item in selected_items:
             item.scale_by(1.1)
 
+        # 更新场景矩形以适应放大后的图片
+        self.update_scene_rect()
         self.status_bar.showMessage(f"已放大 {len(selected_items)} 张图片")
 
     def zoom_out_selected(self):
@@ -1905,6 +1920,8 @@ class ImageComposer(QMainWindow):
         for item in selected_items:
             item.scale_by(0.9)
 
+        # 更新场景矩形
+        self.update_scene_rect()
         self.status_bar.showMessage(f"已缩小 {len(selected_items)} 张图片")
 
     def reset_selected_size(self):
