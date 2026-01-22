@@ -893,7 +893,7 @@ class ImageComposer(QMainWindow):
 
         # 创建场景和视图
         self.scene = QGraphicsScene()
-        self.scene.setSceneRect(0, 0, 3000, 3000)  # 设置更大的场景
+        self.scene.setSceneRect(-5000, -5000, 10000, 10000)  # 设置更大的场景，允许负坐标
 
         self.view = CustomGraphicsView(self.scene)
         self.view.main_window = self  # 设置对主窗口的引用
@@ -901,6 +901,10 @@ class ImageComposer(QMainWindow):
         self.view.setRenderHint(QPainter.SmoothPixmapTransform)
         self.view.setDragMode(QGraphicsView.ScrollHandDrag)
         self.view.setBackgroundBrush(Qt.white)
+
+        # 设置滚动条策略 - 始终显示滚动条
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
 
         self.setCentralWidget(self.view)
 
@@ -2165,7 +2169,7 @@ class ImageComposer(QMainWindow):
             super().keyPressEvent(event)
 
     def wheelEvent(self, event):
-        """鼠标滚轮事件 - 缩放选中的图片"""
+        """鼠标滚轮事件 - 支持触摸板双指平移和缩放"""
         # 检查是否有选中的图片
         selected_items = [item for item in self.scene.selectedItems()
                          if isinstance(item, DraggablePixmapItem)]
@@ -2178,8 +2182,15 @@ class ImageComposer(QMainWindow):
                 self.zoom_out_selected()
             event.accept()
         else:
-            # 否则使用默认行为（缩放视图）
-            super().wheelEvent(event)
+            # 触摸板双指滑动 = 平移视图
+            delta = event.angleDelta()
+            h_scroll = self.view.horizontalScrollBar()
+            v_scroll = self.view.verticalScrollBar()
+
+            # 水平和垂直滚动（负值是因为滑动方向和滚动方向相反）
+            h_scroll.setValue(h_scroll.value() - delta.x())
+            v_scroll.setValue(v_scroll.value() - delta.y())
+            event.accept()
 
 
 def main():
