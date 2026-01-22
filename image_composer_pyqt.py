@@ -873,6 +873,8 @@ class ImageComposer(QMainWindow):
         self.media_player = QMediaPlayer()
         self.media_player.setVolume(100)  # 设置音量为100%
         self.success_sound_path = os.path.join(os.path.dirname(__file__), "prompt_tone.mp3")
+        self.ctrl_s_sound_path = os.path.join(os.path.dirname(__file__), "ctrl+s.mp3")
+        self.alt_s_sound_path = os.path.join(os.path.dirname(__file__), "alt+s.mp3")
 
         # 标记是否是第一次显示窗口
         self.first_show = True
@@ -1053,6 +1055,22 @@ class ImageComposer(QMainWindow):
 
         # 使用 QMediaPlayer 播放（默认设备）
         self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(self.success_sound_path)))
+        self.media_player.play()
+
+    def play_ctrl_s_sound(self):
+        """播放 Ctrl+S 合并提示音"""
+        if not os.path.exists(self.ctrl_s_sound_path):
+            QApplication.beep()
+            return
+        self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(self.ctrl_s_sound_path)))
+        self.media_player.play()
+
+    def play_alt_s_sound(self):
+        """播放 Alt+S 导出提示音"""
+        if not os.path.exists(self.alt_s_sound_path):
+            QApplication.beep()
+            return
+        self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(self.alt_s_sound_path)))
         self.media_player.play()
 
     def setup_global_hotkey(self):
@@ -1775,7 +1793,7 @@ class ImageComposer(QMainWindow):
         self.scene.addItem(merged_item)
 
         self.image_count = 1
-        self.play_success_sound()
+        self.play_ctrl_s_sound()
         self.status_bar.showMessage(f"✓ 已合并为一张图片 (快照 #{count}) | 按 Ctrl+Z 可撤销")
 
     def undo_snapshot(self):
@@ -1962,8 +1980,8 @@ class ImageComposer(QMainWindow):
             # 保存图片
             image.save(file_path, 'PNG')
 
-            # 播放成功提示音（通过笔记本扬声器）
-            self.play_success_sound()
+            # 播放 Alt+S 导出提示音
+            self.play_alt_s_sound()
 
             # 更新状态栏，显示完整路径
             width = int(scene_rect.width())
@@ -2055,8 +2073,8 @@ class ImageComposer(QMainWindow):
             # 保存图片
             image.save(file_path, 'PNG')
 
-            # 播放成功提示音
-            self.play_success_sound()
+            # 播放 Alt+S 导出提示音
+            self.play_alt_s_sound()
 
             # 更新状态栏，显示完整路径
             width = int(scene_rect.width())
