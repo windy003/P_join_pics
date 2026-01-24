@@ -1478,6 +1478,11 @@ class ImageComposer(QMainWindow):
 
         # 更新场景矩形以适应导入的图片
         self.update_scene_rect()
+
+        # 导入成功后播放音效
+        if imported_count > 0:
+            self.play_ctrl_s_sound()
+
         self.status_bar.showMessage(f"已自动导入最近的 {imported_count} 张图片，画布共有 {self.image_count} 张图片")
 
     def pil_to_qpixmap(self, pil_image):
