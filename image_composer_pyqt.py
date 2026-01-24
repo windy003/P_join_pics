@@ -186,8 +186,7 @@ class ArrowUndoStack:
 
     def clear(self):
         """清空撤销栈"""
-        self.undo_stack.clear()
-        self.redo_stack.clear()
+        pass
 
 
 class HotkeySignalEmitter(QObject):
@@ -1263,27 +1262,27 @@ class ImageComposer(QMainWindow):
 
         self.toolbar2.addSeparator()
 
-        # 放大图片
-        zoom_in_action = QAction("🔍+ 放大 (Ctrl+=)", self)
+        # 放大视图
+        zoom_in_action = QAction("🔍+ 放大视图 (Ctrl+=)", self)
         zoom_in_action.setShortcut(QKeySequence("Ctrl+="))
-        zoom_in_action.setToolTip("放大选中的图片 (Ctrl+=)")
-        zoom_in_action.triggered.connect(self.zoom_in_selected)
+        zoom_in_action.setToolTip("放大视图，像素不变 (Ctrl+=)")
+        zoom_in_action.triggered.connect(self.zoom_view_in)
         self.toolbar2.addAction(zoom_in_action)
         self.addAction(zoom_in_action)  # 同时添加到主窗口
 
-        # 缩小图片
-        zoom_out_action = QAction("🔍- 缩小 (Ctrl+-)", self)
+        # 缩小视图
+        zoom_out_action = QAction("🔍- 缩小视图 (Ctrl+-)", self)
         zoom_out_action.setShortcut(QKeySequence("Ctrl+-"))
-        zoom_out_action.setToolTip("缩小选中的图片 (Ctrl+-)")
-        zoom_out_action.triggered.connect(self.zoom_out_selected)
+        zoom_out_action.setToolTip("缩小视图 (Ctrl+-)")
+        zoom_out_action.triggered.connect(self.zoom_view_out)
         self.toolbar2.addAction(zoom_out_action)
         self.addAction(zoom_out_action)  # 同时添加到主窗口
 
-        # 重置大小
-        reset_size_action = QAction("↺ 重置 (Ctrl+0)", self)
+        # 重置视图
+        reset_size_action = QAction("↺ 重置视图 (Ctrl+0)", self)
         reset_size_action.setShortcut(QKeySequence("Ctrl+0"))
-        reset_size_action.setToolTip("重置选中图片的大小 (Ctrl+0)")
-        reset_size_action.triggered.connect(self.reset_selected_size)
+        reset_size_action.setToolTip("重置视图缩放 (Ctrl+0)")
+        reset_size_action.triggered.connect(self.reset_view_zoom)
         self.toolbar2.addAction(reset_size_action)
         self.addAction(reset_size_action)  # 同时添加到主窗口
 
@@ -1767,47 +1766,49 @@ class ImageComposer(QMainWindow):
             self.status_bar.showMessage("已退出移动模式")
 
     def save_snapshot(self):
-        """合并当前画布内容为一张图片 (Ctrl+S)"""
-        if not self.scene.items():
+        """合并当前画布内容为一张图片 (Ctrl+S) - 保持当前显示状态完全不变"""
+        all_items = self.scene.items()
+        if not all_items:
             self.status_bar.showMessage("画布为空，无法合并")
             return
 
         # 先保存当前状态到快照（用于撤销）
         count = self.snapshot_manager.save_snapshot(self.scene, None)
 
-        # 获取所有内容的边界
-        items_rect = self.scene.itemsBoundingRect()
-        if items_rect.isEmpty():
+        # 获取当前显示状态的边界框
+        display_rect = self.scene.itemsBoundingRect()
+        if display_rect.isEmpty():
             self.status_bar.showMessage("画布为空，无法合并")
             return
 
-        # 创建一张新图片，包含所有内容
-        width = int(items_rect.width())
-        height = int(items_rect.height())
+        # 直接用当前显示状态渲染（不改变任何缩放）
+        width = int(display_rect.width())
+        height = int(display_rect.height())
 
-        # 创建 QImage 来渲染场景
         image = QImage(width, height, QImage.Format_ARGB32)
-        image.fill(Qt.white)  # 白色背景
+        image.fill(Qt.white)
 
-        # 用 QPainter 渲染场景到图片
         painter = QPainter(image)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        self.scene.render(painter, QRectF(0, 0, width, height), items_rect)
+        self.scene.render(painter, QRectF(0, 0, width, height), display_rect)
         painter.end()
 
         # 清空场景
         self.scene.clear()
 
-        # 将合并后的图片作为新的可编辑图片添加到场景
+        # 创建合并后的图片，位置与原来完全一致
         pixmap = QPixmap.fromImage(image)
         merged_item = DraggablePixmapItem(pixmap, image, file_path=None)
-        merged_item.setPos(items_rect.topLeft())
+        merged_item.setPos(display_rect.topLeft())
         self.scene.addItem(merged_item)
+
+        # 更新场景矩形
+        self.update_scene_rect()
 
         self.image_count = 1
         self.play_ctrl_s_sound()
-        self.status_bar.showMessage(f"✓ 已合并为一张图片 (快照 #{count}) | 按 Ctrl+Z 可撤销")
+        self.status_bar.showMessage(f"✓ 已合并 ({width}x{height} 像素) | 按 Ctrl+Z 可撤销")
 
     def undo_snapshot(self):
         """撤销到合并前的状态 (Ctrl+Z)"""
@@ -1975,35 +1976,71 @@ class ImageComposer(QMainWindow):
             # 如果目录不存在，创建它
             os.makedirs(save_dir, exist_ok=True)
 
-            # 生成时间戳文件名
+            # 生成时间戳文件名（使用 JPEG 格式以减小文件大小）
             timestamp = datetime.now().strftime("%Y-%m-%d %H %M %S")
-            file_path = os.path.join(save_dir, f"{timestamp}.png")
+            file_path = os.path.join(save_dir, f"{timestamp}.jpg")
 
-            # 获取场景中所有项目的边界框（不添加边距）
-            scene_rect = self.scene.itemsBoundingRect()
+            # 获取当前显示状态的边界框
+            display_rect = self.scene.itemsBoundingRect()
 
-            # 创建QImage用于渲染
-            image = QImage(int(scene_rect.width()), int(scene_rect.height()),
-                          QImage.Format_ARGB32)
+            # 计算原始像素尺寸（临时将所有图片 scale 设为 1.0）
+            saved_scales = {}
+            for item in all_items:
+                if isinstance(item, DraggablePixmapItem):
+                    saved_scales[item] = item.scale()
+                    item.setScale(1.0)
+
+            original_rect = self.scene.itemsBoundingRect()
+
+            # 恢复所有图片的 scale
+            for item, scale in saved_scales.items():
+                item.setScale(scale)
+
+            # 计算缩放因子
+            if original_rect.width() > 0:
+                scale_factor = display_rect.width() / original_rect.width()
+            else:
+                scale_factor = 1.0
+
+            # 使用显示尺寸渲染（保持所有图形位置正确）
+            display_width = int(display_rect.width())
+            display_height = int(display_rect.height())
+
+            # 使用 RGB 格式（JPEG 不支持透明通道）
+            image = QImage(display_width, display_height, QImage.Format_RGB32)
             image.fill(Qt.white)
 
-            # 创建QPainter并渲染场景
             painter = QPainter(image)
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setRenderHint(QPainter.SmoothPixmapTransform)
-            self.scene.render(painter, QRectF(), scene_rect)
+            self.scene.render(painter, QRectF(0, 0, display_width, display_height), display_rect)
             painter.end()
 
-            # 保存图片
-            image.save(file_path, 'PNG')
+            # 设置最大像素尺寸限制（宽或高不超过 1920 像素）
+            MAX_SIZE = 1920
+            current_width = image.width()
+            current_height = image.height()
+
+            # 如果图片超过最大尺寸，按比例缩小
+            if current_width > MAX_SIZE or current_height > MAX_SIZE:
+                if current_width > current_height:
+                    target_width = MAX_SIZE
+                    target_height = int(current_height * MAX_SIZE / current_width)
+                else:
+                    target_height = MAX_SIZE
+                    target_width = int(current_width * MAX_SIZE / current_height)
+                image = image.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+            # 保存为 JPEG 格式，质量 85%
+            image.save(file_path, 'JPEG', 85)
 
             # 播放 Alt+S 导出提示音
             self.play_alt_s_sound()
 
-            # 更新状态栏，显示完整路径
-            width = int(scene_rect.width())
-            height = int(scene_rect.height())
-            self.status_bar.showMessage(f"已保存到: {file_path} ({width}x{height})")
+            # 更新状态栏，显示完整路径和实际尺寸
+            final_width = image.width()
+            final_height = image.height()
+            self.status_bar.showMessage(f"已保存到: {file_path} ({final_width}x{final_height})")
 
             # 导出成功后，删除画布中的所有图片和形状，并删除源文件
             deleted_files = []
@@ -2032,7 +2069,7 @@ class ImageComposer(QMainWindow):
             self.arrow_undo_stack.clear()
 
             # 更新状态栏消息，包含删除信息
-            status_msg = f"已保存到: {file_path} ({width}x{height})"
+            status_msg = f"已保存到: {file_path} ({final_width}x{final_height})"
             if deleted_files:
                 status_msg += f" | 已删除 {len(deleted_files)} 个源文件"
             if shape_count > 0:
@@ -2068,34 +2105,70 @@ class ImageComposer(QMainWindow):
             # 如果目录不存在，创建它
             os.makedirs(desktop_path, exist_ok=True)
 
-            # 生成时间戳文件名
+            # 生成时间戳文件名（使用 JPEG 格式以减小文件大小）
             timestamp = datetime.now().strftime("%Y-%m-%d %H %M %S")
-            file_path = os.path.join(desktop_path, f"{timestamp}.png")
+            file_path = os.path.join(desktop_path, f"{timestamp}.jpg")
 
-            # 获取场景中所有项目的边界框（不添加边距）
-            scene_rect = self.scene.itemsBoundingRect()
+            # 获取当前显示状态的边界框
+            display_rect = self.scene.itemsBoundingRect()
 
-            # 创建QImage用于渲染
-            image = QImage(int(scene_rect.width()), int(scene_rect.height()),
-                          QImage.Format_ARGB32)
+            # 计算原始像素尺寸（临时将所有图片 scale 设为 1.0）
+            saved_scales = {}
+            for item in all_items:
+                if isinstance(item, DraggablePixmapItem):
+                    saved_scales[item] = item.scale()
+                    item.setScale(1.0)
+
+            original_rect = self.scene.itemsBoundingRect()
+
+            # 恢复所有图片的 scale
+            for item, scale in saved_scales.items():
+                item.setScale(scale)
+
+            # 计算缩放因子
+            if original_rect.width() > 0:
+                scale_factor = display_rect.width() / original_rect.width()
+            else:
+                scale_factor = 1.0
+
+            # 使用显示尺寸渲染（保持所有图形位置正确）
+            display_width = int(display_rect.width())
+            display_height = int(display_rect.height())
+
+            # 使用 RGB 格式（JPEG 不支持透明通道）
+            image = QImage(display_width, display_height, QImage.Format_RGB32)
             image.fill(Qt.white)
 
-            # 创建QPainter并渲染场景
             painter = QPainter(image)
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setRenderHint(QPainter.SmoothPixmapTransform)
-            self.scene.render(painter, QRectF(), scene_rect)
+            self.scene.render(painter, QRectF(0, 0, display_width, display_height), display_rect)
             painter.end()
 
-            # 保存图片
-            image.save(file_path, 'PNG')
+            # 设置最大像素尺寸限制（宽或高不超过 1920 像素）
+            MAX_SIZE = 1920
+            current_width = image.width()
+            current_height = image.height()
+
+            # 如果图片超过最大尺寸，按比例缩小
+            if current_width > MAX_SIZE or current_height > MAX_SIZE:
+                if current_width > current_height:
+                    target_width = MAX_SIZE
+                    target_height = int(current_height * MAX_SIZE / current_width)
+                else:
+                    target_height = MAX_SIZE
+                    target_width = int(current_width * MAX_SIZE / current_height)
+                image = image.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+            # 保存为 JPEG 格式，质量 85%
+            image.save(file_path, 'JPEG', 85)
 
             # 播放 Alt+S 导出提示音
             self.play_alt_s_sound()
 
-            # 更新状态栏，显示完整路径
-            width = int(scene_rect.width())
-            height = int(scene_rect.height())
+            # 更新状态栏，显示完整路径和实际尺寸
+            final_width = image.width()
+            final_height = image.height()
 
             # 导出成功后，删除画布中的所有图片和形状，并删除源文件
             deleted_files = []
@@ -2124,7 +2197,7 @@ class ImageComposer(QMainWindow):
             self.arrow_undo_stack.clear()
 
             # 更新状态栏消息，包含删除信息
-            status_msg = f"已保存到桌面: {file_path} ({width}x{height})"
+            status_msg = f"已保存到桌面: {file_path} ({final_width}x{final_height})"
             if deleted_files:
                 status_msg += f" | 已删除 {len(deleted_files)} 个源文件"
             if shape_count > 0:
@@ -2205,16 +2278,12 @@ class ImageComposer(QMainWindow):
 
     def wheelEvent(self, event):
         """鼠标滚轮事件 - 支持触摸板双指平移和缩放"""
-        # 检查是否有选中的图片
-        selected_items = [item for item in self.scene.selectedItems()
-                         if isinstance(item, DraggablePixmapItem)]
-
-        if selected_items and event.modifiers() == Qt.ControlModifier:
-            # Ctrl+滚轮：缩放选中的图片
+        if event.modifiers() == Qt.ControlModifier:
+            # Ctrl+滚轮：缩放视图（不改变图片像素，只是视觉放大）
             if event.angleDelta().y() > 0:
-                self.zoom_in_selected()
+                self.view.scale(1.15, 1.15)
             else:
-                self.zoom_out_selected()
+                self.view.scale(1/1.15, 1/1.15)
             event.accept()
         else:
             # 触摸板双指滑动 = 平移视图
@@ -2226,6 +2295,21 @@ class ImageComposer(QMainWindow):
             h_scroll.setValue(h_scroll.value() - delta.x())
             v_scroll.setValue(v_scroll.value() - delta.y())
             event.accept()
+
+    def zoom_view_in(self):
+        """放大视图（不改变图片像素）"""
+        self.view.scale(1.2, 1.2)
+        self.status_bar.showMessage("视图已放大（像素不变）")
+
+    def zoom_view_out(self):
+        """缩小视图"""
+        self.view.scale(1/1.2, 1/1.2)
+        self.status_bar.showMessage("视图已缩小")
+
+    def reset_view_zoom(self):
+        """重置视图缩放"""
+        self.view.resetTransform()
+        self.status_bar.showMessage("视图已重置")
 
 
 def main():
