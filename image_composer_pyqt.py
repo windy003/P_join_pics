@@ -964,6 +964,9 @@ class ImageComposer(QMainWindow):
         # 图片计数
         self.image_count = 0
 
+        # 待删除的原始文件路径（用于合并后导出时删除）
+        self.pending_delete_files = []
+
     def create_system_tray(self):
         """创建系统托盘图标"""
         # 创建托盘图标
@@ -1799,6 +1802,12 @@ class ImageComposer(QMainWindow):
         self.scene.render(painter, QRectF(0, 0, width, height), display_rect)
         painter.end()
 
+        # 收集所有原始图片的文件路径（用于导出时删除）
+        for item in all_items:
+            if isinstance(item, DraggablePixmapItem):
+                if item.file_path and item.file_path not in self.pending_delete_files:
+                    self.pending_delete_files.append(item.file_path)
+
         # 清空场景
         self.scene.clear()
 
@@ -2070,6 +2079,16 @@ class ImageComposer(QMainWindow):
                     self.scene.removeItem(item)
                     shape_count += 1
 
+            # 删除合并前保存的原始文件（pending_delete_files）
+            for pending_file in self.pending_delete_files:
+                if os.path.exists(pending_file):
+                    try:
+                        os.remove(pending_file)
+                        deleted_files.append(os.path.basename(pending_file))
+                    except Exception as e:
+                        failed_deletions.append(f"{os.path.basename(pending_file)}: {str(e)}")
+            self.pending_delete_files.clear()
+
             # 清空撤销栈（因为所有形状都被删除了）
             self.arrow_undo_stack.clear()
 
@@ -2197,6 +2216,16 @@ class ImageComposer(QMainWindow):
                     # 删除所有形状（箭头、线条、矩形框）
                     self.scene.removeItem(item)
                     shape_count += 1
+
+            # 删除合并前保存的原始文件（pending_delete_files）
+            for pending_file in self.pending_delete_files:
+                if os.path.exists(pending_file):
+                    try:
+                        os.remove(pending_file)
+                        deleted_files.append(os.path.basename(pending_file))
+                    except Exception as e:
+                        failed_deletions.append(f"{os.path.basename(pending_file)}: {str(e)}")
+            self.pending_delete_files.clear()
 
             # 清空撤销栈（因为所有形状都被删除了）
             self.arrow_undo_stack.clear()
