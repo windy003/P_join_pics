@@ -20,6 +20,8 @@ load_dotenv()
 
 # 从环境变量获取输入目录，默认为 OneDrive\图片\Screenshots
 INPUT_DIR = os.getenv('INPUT_DIR', os.path.join(os.path.expanduser("~"), "OneDrive", "图片", "Screenshots"))
+# 从环境变量获取桌面目录，默认为 OneDrive\Desktop
+DESKTOP_DIR = os.getenv('desktop_dir', os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop"))
 import ctypes
 
 try:
@@ -2129,9 +2131,8 @@ class ImageComposer(QMainWindow):
             return
 
         try:
-            # 获取桌面路径 (OneDrive\Desktop)
-            user_home = os.path.expanduser("~")
-            desktop_path = os.path.join(user_home, "OneDrive", "Desktop")
+            # 从环境变量获取桌面路径
+            desktop_path = DESKTOP_DIR
 
             # 如果目录不存在，创建它
             os.makedirs(desktop_path, exist_ok=True)
