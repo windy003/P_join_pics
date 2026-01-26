@@ -13,6 +13,13 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PIL import Image
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+# 加载 .env 文件
+load_dotenv()
+
+# 从环境变量获取输入目录，默认为 OneDrive\图片\Screenshots
+INPUT_DIR = os.getenv('INPUT_DIR', os.path.join(os.path.expanduser("~"), "OneDrive", "图片", "Screenshots"))
 import ctypes
 
 try:
@@ -1356,8 +1363,8 @@ class ImageComposer(QMainWindow):
 
     def import_images(self):
         """导入多张图片"""
-        # 设置默认路径为 OneDrive\图片\Screenshots
-        default_path = os.path.join(os.path.expanduser("~"), "OneDrive", "图片", "Screenshots")
+        # 从环境变量获取输入目录
+        default_path = INPUT_DIR
         # 如果目录不存在，回退到用户主目录
         if not os.path.exists(default_path):
             default_path = os.path.expanduser("~")
@@ -1411,8 +1418,8 @@ class ImageComposer(QMainWindow):
 
     def import_recent_images(self, count):
         """自动导入最近的N张图片（不打开对话框）"""
-        # 设置默认路径为 OneDrive\图片\Screenshots
-        default_path = os.path.join(os.path.expanduser("~"), "OneDrive", "图片", "Screenshots")
+        # 从环境变量获取输入目录
+        default_path = INPUT_DIR
 
         # 如果目录不存在，显示错误信息
         if not os.path.exists(default_path):
