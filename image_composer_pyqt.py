@@ -1166,6 +1166,12 @@ class ImageComposer(QMainWindow):
         self.toolbar1.addAction(import_action)
         self.addAction(import_action)  # 同时添加到主窗口，确保快捷键始终有效
 
+        # 绑定Ctrl+Shift+O快捷键（从任意位置选择文件）
+        import_anywhere_action = QAction(self)
+        import_anywhere_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        import_anywhere_action.triggered.connect(self.import_images_from_anywhere)
+        self.addAction(import_anywhere_action)
+
         # 导出图片 - Alt+S 最终保存
         export_action = QAction("💾 导出 (Alt+S)", self)
         export_action.setShortcut(QKeySequence("Alt+S"))
@@ -1377,6 +1383,57 @@ class ImageComposer(QMainWindow):
             return
 
         file_paths = picker.get_selected_files()
+        if not file_paths:
+            return
+
+        # 起始位置
+        offset_x = 100
+        offset_y = 100
+
+        for i, file_path in enumerate(file_paths):
+            try:
+                # 使用PIL加载原始图片
+                pil_image = Image.open(file_path)
+
+                # 直接使用原始图片，不进行缩放
+                display_image = pil_image
+
+                # 转换为QPixmap
+                pixmap = self.pil_to_qpixmap(display_image)
+
+                # 创建可拖拽的图片项（display_scale=1.0表示不缩放，传递文件路径）
+                item = DraggablePixmapItem(pixmap, pil_image, display_scale=1.0, file_path=file_path)
+
+                # 设置位置（每张图片稍微错开）
+                x = offset_x + (i * 40)
+                y = offset_y + (i * 40)
+                item.setPos(x, y)
+
+                # 添加到场景
+                self.scene.addItem(item)
+                self.image_count += 1
+
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "错误",
+                    f"无法加载图片 {os.path.basename(file_path)}:\n{str(e)}"
+                )
+
+        # 更新场景矩形以适应导入的图片
+        self.update_scene_rect()
+        self.status_bar.showMessage(f"已导入 {len(file_paths)} 张图片，画布共有 {self.image_count} 张图片")
+
+    def import_images_from_anywhere(self):
+        """从任意位置选择并导入图片 (Ctrl+Shift+O)"""
+        # 使用标准文件选择对话框
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "选择图片",
+            os.path.expanduser("~"),
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;所有文件 (*.*)"
+        )
+
         if not file_paths:
             return
 
