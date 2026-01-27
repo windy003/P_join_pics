@@ -1992,9 +1992,8 @@ class ImageComposer(QMainWindow):
             return
 
         try:
-            # 获取用户OneDrive图片目录
-            user_home = os.path.expanduser("~")
-            save_dir = os.path.join(user_home, "OneDrive", "图片", "Screenshots")
+            # 从环境变量获取保存目录
+            save_dir = INPUT_DIR
 
             # 如果目录不存在，创建它
             os.makedirs(save_dir, exist_ok=True)
