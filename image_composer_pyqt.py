@@ -1531,20 +1531,31 @@ class ImageComposer(QMainWindow):
 
     def toggle_arrow_mode(self):
         """切换箭头绘制模式"""
+        # 如果已经在箭头模式，保持模式并重置计时器
+        if self.arrow_mode:
+            self.arrow_action.setChecked(True)
+            self.arrow_mode_timer.start(60000)
+            self.status_bar.showMessage("箭头绘制模式：按住鼠标左键拖动绘制箭头 | 1分钟无操作自动退出")
+            return
+
         self.arrow_mode = self.arrow_action.isChecked()
 
         if self.arrow_mode:
             # 进入箭头模式，先退出其他模式
             if self.line_mode:
+                self.line_mode = False
                 self.line_action.setChecked(False)
                 self.toggle_line_mode()
             if self.rect_mode:
+                self.rect_mode = False
                 self.rect_action.setChecked(False)
                 self.toggle_rect_mode()
             if self.text_mode:
+                self.text_mode = False
                 self.text_action.setChecked(False)
                 self.toggle_text_mode()
             if self.move_mode:
+                self.move_mode = False
                 self.move_action.setChecked(False)
                 self.toggle_move_mode()
 
@@ -1557,7 +1568,7 @@ class ImageComposer(QMainWindow):
             self.view.setCursor(Qt.CrossCursor)
             self.view.viewport().setCursor(Qt.CrossCursor)
             self.view.viewport().setMouseTracking(True)
-            self.status_bar.showMessage("箭头绘制模式：按住鼠标左键拖动绘制箭头 | 再次按 Ctrl+A 退出 | 1分钟无操作自动退出")
+            self.status_bar.showMessage("箭头绘制模式：按住鼠标左键拖动绘制箭头 | 1分钟无操作自动退出")
             # 启动1分钟定时器
             self.arrow_mode_timer.start(60000)  # 60000毫秒 = 1分钟
         else:
@@ -1580,28 +1591,39 @@ class ImageComposer(QMainWindow):
     def auto_exit_arrow_mode(self):
         """1分钟无操作后自动退出箭头模式"""
         if self.arrow_mode:
-            # 取消箭头模式的选中状态
+            # 先将模式变量设为False，再调用toggle退出
+            self.arrow_mode = False
             self.arrow_action.setChecked(False)
-            # 调用切换方法退出箭头模式
             self.toggle_arrow_mode()
             self.status_bar.showMessage("箭头绘制模式已自动退出（1分钟无操作）")
 
     def toggle_line_mode(self):
         """切换细线绘制模式"""
+        # 如果已经在细线模式，保持模式并重置计时器
+        if self.line_mode:
+            self.line_action.setChecked(True)
+            self.line_mode_timer.start(60000)
+            self.status_bar.showMessage("细线绘制模式：按住鼠标左键拖动绘制细线 | 1分钟无操作自动退出")
+            return
+
         self.line_mode = self.line_action.isChecked()
 
         if self.line_mode:
             # 进入画线模式，先退出其他模式
             if self.arrow_mode:
+                self.arrow_mode = False
                 self.arrow_action.setChecked(False)
                 self.toggle_arrow_mode()
             if self.rect_mode:
+                self.rect_mode = False
                 self.rect_action.setChecked(False)
                 self.toggle_rect_mode()
             if self.text_mode:
+                self.text_mode = False
                 self.text_action.setChecked(False)
                 self.toggle_text_mode()
             if self.move_mode:
+                self.move_mode = False
                 self.move_action.setChecked(False)
                 self.toggle_move_mode()
 
@@ -1614,7 +1636,7 @@ class ImageComposer(QMainWindow):
             self.view.setCursor(Qt.CrossCursor)
             self.view.viewport().setCursor(Qt.CrossCursor)
             self.view.viewport().setMouseTracking(True)
-            self.status_bar.showMessage("细线绘制模式：按住鼠标左键拖动绘制细线 | 再次按 Ctrl+L 退出 | 1分钟无操作自动退出")
+            self.status_bar.showMessage("细线绘制模式：按住鼠标左键拖动绘制细线 | 1分钟无操作自动退出")
             # 启动1分钟定时器
             self.line_mode_timer.start(60000)  # 60000毫秒 = 1分钟
         else:
@@ -1637,28 +1659,39 @@ class ImageComposer(QMainWindow):
     def auto_exit_line_mode(self):
         """1分钟无操作后自动退出画线模式"""
         if self.line_mode:
-            # 取消画线模式的选中状态
+            # 先将模式变量设为False，再调用toggle退出
+            self.line_mode = False
             self.line_action.setChecked(False)
-            # 调用切换方法退出画线模式
             self.toggle_line_mode()
             self.status_bar.showMessage("细线绘制模式已自动退出（1分钟无操作）")
 
     def toggle_rect_mode(self):
         """切换矩形绘制模式"""
+        # 如果已经在矩形模式，保持模式并重置计时器
+        if self.rect_mode:
+            self.rect_action.setChecked(True)
+            self.rect_mode_timer.start(60000)
+            self.status_bar.showMessage("矩形绘制模式：按住鼠标左键拖动绘制矩形框 | 1分钟无操作自动退出")
+            return
+
         self.rect_mode = self.rect_action.isChecked()
 
         if self.rect_mode:
             # 进入矩形模式，先退出其他模式
             if self.arrow_mode:
+                self.arrow_mode = False
                 self.arrow_action.setChecked(False)
                 self.toggle_arrow_mode()
             if self.line_mode:
+                self.line_mode = False
                 self.line_action.setChecked(False)
                 self.toggle_line_mode()
             if self.text_mode:
+                self.text_mode = False
                 self.text_action.setChecked(False)
                 self.toggle_text_mode()
             if self.move_mode:
+                self.move_mode = False
                 self.move_action.setChecked(False)
                 self.toggle_move_mode()
 
@@ -1671,7 +1704,7 @@ class ImageComposer(QMainWindow):
             self.view.setCursor(Qt.CrossCursor)
             self.view.viewport().setCursor(Qt.CrossCursor)
             self.view.viewport().setMouseTracking(True)
-            self.status_bar.showMessage("矩形绘制模式：按住鼠标左键拖动绘制矩形框 | 再次按 Ctrl+R 退出 | 1分钟无操作自动退出")
+            self.status_bar.showMessage("矩形绘制模式：按住鼠标左键拖动绘制矩形框 | 1分钟无操作自动退出")
             # 启动1分钟定时器
             self.rect_mode_timer.start(60000)  # 60000毫秒 = 1分钟
         else:
@@ -1694,28 +1727,39 @@ class ImageComposer(QMainWindow):
     def auto_exit_rect_mode(self):
         """1分钟无操作后自动退出矩形模式"""
         if self.rect_mode:
-            # 取消矩形模式的选中状态
+            # 先将模式变量设为False，再调用toggle退出
+            self.rect_mode = False
             self.rect_action.setChecked(False)
-            # 调用切换方法退出矩形模式
             self.toggle_rect_mode()
             self.status_bar.showMessage("矩形绘制模式已自动退出（1分钟无操作）")
 
     def toggle_text_mode(self):
         """切换文本输入模式"""
+        # 如果已经在文本模式，保持模式并重置计时器
+        if self.text_mode:
+            self.text_action.setChecked(True)
+            self.text_mode_timer.start(60000)
+            self.status_bar.showMessage("文本输入模式：点击画布添加文字 | 1分钟无操作自动退出")
+            return
+
         self.text_mode = self.text_action.isChecked()
 
         if self.text_mode:
             # 进入文本模式，先退出其他模式
             if self.arrow_mode:
+                self.arrow_mode = False
                 self.arrow_action.setChecked(False)
                 self.toggle_arrow_mode()
             if self.line_mode:
+                self.line_mode = False
                 self.line_action.setChecked(False)
                 self.toggle_line_mode()
             if self.rect_mode:
+                self.rect_mode = False
                 self.rect_action.setChecked(False)
                 self.toggle_rect_mode()
             if self.move_mode:
+                self.move_mode = False
                 self.move_action.setChecked(False)
                 self.toggle_move_mode()
 
@@ -1728,7 +1772,7 @@ class ImageComposer(QMainWindow):
             self.view.setCursor(Qt.CrossCursor)
             self.view.viewport().setCursor(Qt.CrossCursor)
             self.view.viewport().setMouseTracking(True)
-            self.status_bar.showMessage("文本输入模式：点击画布添加文字 | 再次按 Ctrl+T 退出 | 1分钟无操作自动退出")
+            self.status_bar.showMessage("文本输入模式：点击画布添加文字 | 1分钟无操作自动退出")
             # 启动1分钟定时器
             self.text_mode_timer.start(60000)
         else:
@@ -1745,28 +1789,38 @@ class ImageComposer(QMainWindow):
     def auto_exit_text_mode(self):
         """1分钟无操作后自动退出文本模式"""
         if self.text_mode:
-            # 取消文本模式的选中状态
+            # 先将模式变量设为False，再调用toggle退出
+            self.text_mode = False
             self.text_action.setChecked(False)
-            # 调用切换方法退出文本模式
             self.toggle_text_mode()
             self.status_bar.showMessage("文本输入模式已自动退出（1分钟无操作）")
 
     def toggle_move_mode(self):
         """切换移动模式"""
+        # 如果已经在移动模式，保持模式
+        if self.move_mode:
+            self.move_action.setChecked(True)
+            self.status_bar.showMessage("移动模式：可框选和移动图片/形状/文字")
+            return
+
         self.move_mode = self.move_action.isChecked()
 
         if self.move_mode:
             # 进入移动模式，先退出其他绘制模式
             if self.arrow_mode:
+                self.arrow_mode = False
                 self.arrow_action.setChecked(False)
                 self.toggle_arrow_mode()
             if self.line_mode:
+                self.line_mode = False
                 self.line_action.setChecked(False)
                 self.toggle_line_mode()
             if self.rect_mode:
+                self.rect_mode = False
                 self.rect_action.setChecked(False)
                 self.toggle_rect_mode()
             if self.text_mode:
+                self.text_mode = False
                 self.text_action.setChecked(False)
                 self.toggle_text_mode()
 
@@ -1774,7 +1828,7 @@ class ImageComposer(QMainWindow):
             self.view.setDragMode(QGraphicsView.RubberBandDrag)
             self.view.setCursor(Qt.ArrowCursor)
             self.view.viewport().setCursor(Qt.ArrowCursor)
-            self.status_bar.showMessage("移动模式：可框选和移动图片/形状/文字 | 再次按 Ctrl+M 退出")
+            self.status_bar.showMessage("移动模式：可框选和移动图片/形状/文字")
         else:
             # 退出移动模式，恢复默认的拖拽画布模式
             self.view.setDragMode(QGraphicsView.ScrollHandDrag)
