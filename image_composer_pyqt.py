@@ -171,31 +171,61 @@ class SnapshotManager:
 
 # 保留旧的类名以兼容
 class ArrowUndoStack:
-    """兼容旧代码的空实现"""
+    """绘图操作撤销栈 - 支持箭头、线条、矩形、文字的撤销"""
     def __init__(self):
-        pass
+        self.undo_stack = []  # 存储操作记录: {'type': 'add'/'delete', 'scene': scene, 'items': [items]}
 
-    def push_add_arrow(self, scene, arrow):
-        pass
+    def push_add_arrow(self, scene, item):
+        """记录添加绘图元素的操作"""
+        self.undo_stack.append({
+            'type': 'add',
+            'scene': scene,
+            'items': [item]
+        })
 
-    def push_delete_arrows(self, scene, arrows):
-        pass
+    def push_delete_arrows(self, scene, items):
+        """记录删除绘图元素的操作"""
+        if items:
+            self.undo_stack.append({
+                'type': 'delete',
+                'scene': scene,
+                'items': list(items)
+            })
 
     def undo(self):
-        return False
+        """撤销最近一次绘图操作"""
+        if not self.undo_stack:
+            return False
+
+        action = self.undo_stack.pop()
+        scene = action['scene']
+        items = action['items']
+
+        if action['type'] == 'add':
+            # 撤销添加操作 = 删除元素
+            for item in items:
+                if item.scene() == scene:
+                    scene.removeItem(item)
+        elif action['type'] == 'delete':
+            # 撤销删除操作 = 恢复元素
+            for item in items:
+                scene.addItem(item)
+
+        return True
 
     def redo(self):
         return False
 
     def can_undo(self):
-        return False
+        """是否有操作可以撤销"""
+        return len(self.undo_stack) > 0
 
     def can_redo(self):
         return False
 
     def clear(self):
         """清空撤销栈"""
-        pass
+        self.undo_stack.clear()
 
 
 class HotkeySignalEmitter(QObject):
@@ -1270,10 +1300,10 @@ class ImageComposer(QMainWindow):
         self.toolbar2.addAction(snapshot_action)
         self.addAction(snapshot_action)
 
-        # 撤销到上一个状态
+        # 撤销操作
         undo_action = QAction("↶ 撤销 (Ctrl+Z)", self)
         undo_action.setShortcut(QKeySequence("Ctrl+Z"))
-        undo_action.setToolTip("撤销到合并前的状态 (Ctrl+Z)")
+        undo_action.setToolTip("撤销绘图操作或合并 (Ctrl+Z)")
         undo_action.triggered.connect(self.undo_snapshot)
         self.toolbar2.addAction(undo_action)
         self.addAction(undo_action)
@@ -1945,9 +1975,18 @@ class ImageComposer(QMainWindow):
         self.status_bar.showMessage(f"✓ 已合并 ({width}x{height} 像素) | 按 Ctrl+Z 可撤销")
 
     def undo_snapshot(self):
-        """撤销到合并前的状态 (Ctrl+Z)"""
+        """撤销操作 (Ctrl+Z) - 优先撤销绘图操作，没有时才撤销快照"""
+        # 首先检查是否有绘图操作可撤销
+        if self.arrow_undo_stack.can_undo():
+            if self.arrow_undo_stack.undo():
+                self.play_success_sound()
+                remaining = len(self.arrow_undo_stack.undo_stack)
+                self.status_bar.showMessage(f"✓ 已撤销绘图操作 | 剩余 {remaining} 个绘图操作可撤销")
+                return
+
+        # 没有绘图操作可撤销，尝试撤销快照
         if not self.snapshot_manager.has_snapshots():
-            self.status_bar.showMessage("没有可撤销的操作，请先按 Ctrl+S 合并")
+            self.status_bar.showMessage("没有可撤销的操作")
             return
 
         success, remaining = self.snapshot_manager.restore_snapshot(self.scene)
