@@ -609,7 +609,7 @@ class ArrowItem(QGraphicsItemGroup):
         super().__init__()
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        
 
         self.start_point = start_point
         self.end_point = end_point
