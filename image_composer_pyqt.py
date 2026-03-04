@@ -1792,6 +1792,7 @@ class ImageComposer(QMainWindow):
             self.view.viewport().setCursor(Qt.CrossCursor)
             self.view.viewport().setMouseTracking(True)
             self.status_bar.showMessage("矩形绘制模式：按住鼠标左键拖动绘制矩形框 | 1分钟无操作自动退出")
+            self.play_ctrl_s_sound()
             # 启动1分钟定时器
             self.rect_mode_timer.start(60000)  # 60000毫秒 = 1分钟
         else:
