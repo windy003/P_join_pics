@@ -384,7 +384,7 @@ class MultiLineTextDialog(QDialog):
         layout = QVBoxLayout()
 
         # 提示标签
-        label = QLabel("请输入要添加的文字（Ctrl+Enter 确认）：")
+        label = QLabel("请输入要添加的文字（Ctrl+Enter 确认 | Ctrl+Shift+V 格式化粘贴）：")
         layout.addWidget(label)
 
         # 多行文本输入框
@@ -402,10 +402,17 @@ class MultiLineTextDialog(QDialog):
         self.setLayout(layout)
 
     def eventFilter(self, obj, event):
-        """事件过滤器，处理Ctrl+Enter快捷键"""
+        """事件过滤器，处理Ctrl+Enter快捷键 和 Ctrl+Shift+V 格式化粘贴"""
         if obj == self.text_edit and event.type() == event.KeyPress:
             if event.key() == Qt.Key_Return and event.modifiers() == Qt.ControlModifier:
                 self.accept()
+                return True
+            if (event.key() == Qt.Key_V and
+                    event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier)):
+                clipboard = QApplication.clipboard()
+                plain_text = clipboard.text()
+                if plain_text:
+                    self.text_edit.insertPlainText(plain_text)
                 return True
         return super().eventFilter(obj, event)
 

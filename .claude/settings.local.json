@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(find /d/files/using/Python/P_join_pics -type f | grep -E \"\\\\.\\(py|txt|md|json|cfg\\)$\")"
     ]
   }
 }
