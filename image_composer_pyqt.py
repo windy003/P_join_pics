@@ -170,12 +170,12 @@ class SnapshotManager:
 
 
 # 保留旧的类名以兼容
-class ArrowUndoStack:
+class DrawingUndoStack:
     """绘图操作撤销栈 - 支持箭头、线条、矩形、文字的撤销"""
     def __init__(self):
         self.undo_stack = []  # 存储操作记录: {'type': 'add'/'delete', 'scene': scene, 'items': [items]}
 
-    def push_add_arrow(self, scene, item):
+    def push_add_item(self, scene, item):
         """记录添加绘图元素的操作"""
         self.undo_stack.append({
             'type': 'add',
@@ -183,7 +183,7 @@ class ArrowUndoStack:
             'items': [item]
         })
 
-    def push_delete_arrows(self, scene, items):
+    def push_delete_items(self, scene, items):
         """记录删除绘图元素的操作"""
         if items:
             self.undo_stack.append({
@@ -854,7 +854,7 @@ class CustomGraphicsView(QGraphicsView):
                     arrow = ArrowItem(self.main_window.arrow_start_point, scene_pos)
                     self.scene().addItem(arrow)
                     # 添加到撤销栈
-                    self.main_window.arrow_undo_stack.push_add_arrow(self.scene(), arrow)
+                    self.main_window.drawing_undo_stack.push_add_item(self.scene(), arrow)
 
                 self.main_window.arrow_start_point = None
             event.accept()  # 标记事件已处理
@@ -872,7 +872,7 @@ class CustomGraphicsView(QGraphicsView):
                     line = LineItem(self.main_window.line_start_point, scene_pos)
                     self.scene().addItem(line)
                     # 添加到撤销栈
-                    self.main_window.arrow_undo_stack.push_add_arrow(self.scene(), line)
+                    self.main_window.drawing_undo_stack.push_add_item(self.scene(), line)
 
                 self.main_window.line_start_point = None
             event.accept()  # 标记事件已处理
@@ -890,7 +890,7 @@ class CustomGraphicsView(QGraphicsView):
                     rect = RectItem(self.main_window.rect_start_point, scene_pos)
                     self.scene().addItem(rect)
                     # 添加到撤销栈
-                    self.main_window.arrow_undo_stack.push_add_arrow(self.scene(), rect)
+                    self.main_window.drawing_undo_stack.push_add_item(self.scene(), rect)
 
                 self.main_window.rect_start_point = None
             event.accept()  # 标记事件已处理
@@ -909,7 +909,7 @@ class ImageComposer(QMainWindow):
         self.hotkey_emitter.show_signal.connect(self.toggle_window)
 
         # 创建箭头操作的撤销栈
-        self.arrow_undo_stack = ArrowUndoStack()
+        self.drawing_undo_stack = DrawingUndoStack()
 
         # 创建快照管理器
         self.snapshot_manager = SnapshotManager()
@@ -1985,10 +1985,10 @@ class ImageComposer(QMainWindow):
     def undo_snapshot(self):
         """撤销操作 (Ctrl+Z) - 优先撤销绘图操作，没有时才撤销快照"""
         # 首先检查是否有绘图操作可撤销
-        if self.arrow_undo_stack.can_undo():
-            if self.arrow_undo_stack.undo():
+        if self.drawing_undo_stack.can_undo():
+            if self.drawing_undo_stack.undo():
                 self.play_success_sound()
-                remaining = len(self.arrow_undo_stack.undo_stack)
+                remaining = len(self.drawing_undo_stack.undo_stack)
                 self.status_bar.showMessage(f"✓ 已撤销绘图操作 | 剩余 {remaining} 个绘图操作可撤销")
                 return
 
@@ -2046,19 +2046,19 @@ class ImageComposer(QMainWindow):
 
         # 将箭头删除操作添加到撤销栈
         if arrows_to_delete:
-            self.arrow_undo_stack.push_delete_arrows(self.scene, arrows_to_delete)
+            self.drawing_undo_stack.push_delete_items(self.scene, arrows_to_delete)
 
         # 将线条删除操作添加到撤销栈
         if lines_to_delete:
-            self.arrow_undo_stack.push_delete_arrows(self.scene, lines_to_delete)
+            self.drawing_undo_stack.push_delete_items(self.scene, lines_to_delete)
 
         # 将矩形框删除操作添加到撤销栈
         if rects_to_delete:
-            self.arrow_undo_stack.push_delete_arrows(self.scene, rects_to_delete)
+            self.drawing_undo_stack.push_delete_items(self.scene, rects_to_delete)
 
         # 将文字删除操作添加到撤销栈
         if texts_to_delete:
-            self.arrow_undo_stack.push_delete_arrows(self.scene, texts_to_delete)
+            self.drawing_undo_stack.push_delete_items(self.scene, texts_to_delete)
 
         msg = []
         if image_count > 0:
@@ -2256,7 +2256,7 @@ class ImageComposer(QMainWindow):
             self.pending_delete_files.clear()
 
             # 清空撤销栈（因为所有形状都被删除了）
-            self.arrow_undo_stack.clear()
+            self.drawing_undo_stack.clear()
 
             # 更新状态栏消息，包含删除信息
             status_msg = f"已保存到: {file_path} ({final_width}x{final_height})"
@@ -2393,7 +2393,7 @@ class ImageComposer(QMainWindow):
             self.pending_delete_files.clear()
 
             # 清空撤销栈（因为所有形状都被删除了）
-            self.arrow_undo_stack.clear()
+            self.drawing_undo_stack.clear()
 
             # 更新状态栏消息，包含删除信息
             status_msg = f"已保存到桌面: {file_path} ({final_width}x{final_height})"
