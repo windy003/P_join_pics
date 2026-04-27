@@ -2255,8 +2255,9 @@ class ImageComposer(QMainWindow):
                         failed_deletions.append(f"{os.path.basename(pending_file)}: {str(e)}")
             self.pending_delete_files.clear()
 
-            # 清空撤销栈（因为所有形状都被删除了）
+            # 清空撤销栈和快照（因为所有内容都被删除了）
             self.drawing_undo_stack.clear()
+            self.snapshot_manager.clear()
 
             # 更新状态栏消息，包含删除信息
             status_msg = f"已保存到: {file_path} ({final_width}x{final_height})"
@@ -2392,8 +2393,9 @@ class ImageComposer(QMainWindow):
                         failed_deletions.append(f"{os.path.basename(pending_file)}: {str(e)}")
             self.pending_delete_files.clear()
 
-            # 清空撤销栈（因为所有形状都被删除了）
+            # 清空撤销栈和快照（因为所有内容都被删除了）
             self.drawing_undo_stack.clear()
+            self.snapshot_manager.clear()
 
             # 更新状态栏消息，包含删除信息
             status_msg = f"已保存到桌面: {file_path} ({final_width}x{final_height})"
