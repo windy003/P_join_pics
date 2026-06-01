@@ -23,12 +23,142 @@ INPUT_DIR = os.getenv('INPUT_DIR', os.path.join(os.path.expanduser("~"), "OneDri
 # 从环境变量获取桌面目录，默认为 OneDrive\Desktop
 DESKTOP_DIR = os.getenv('desktop_dir', os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop"))
 import ctypes
+from ctypes import wintypes
+import threading
 
-try:
-    import keyboard
-    KEYBOARD_AVAILABLE = True
-except ImportError:
-    KEYBOARD_AVAILABLE = False
+# 全局快捷键改用 Windows 原生 RegisterHotKey API（替代不稳定的 keyboard 库）。
+
+
+class GlobalHotkey:
+    """基于 Windows 原生 RegisterHotKey 的全局快捷键。
+
+    与 keyboard 库的低级键盘钩子不同，这里由操作系统负责匹配组合键，
+    只在命中时往本线程消息队列投递一条 WM_HOTKEY 消息，不处理其它按键，
+    因此不会因主线程繁忙（合成大图 / 弹对话框 / 播音效）导致系统把钩子
+    超时摘除——也就不会出现"快捷键失灵"。
+    """
+
+    WM_HOTKEY = 0x0312
+    WM_APP_REREGISTER = 0x0400 + 1   # 通知后台线程重新注册热键
+    WM_APP_QUIT = 0x0400 + 2         # 通知后台线程退出
+
+    MOD_ALT = 0x0001
+    MOD_CONTROL = 0x0002
+    MOD_SHIFT = 0x0004
+    MOD_WIN = 0x0008
+    MOD_NOREPEAT = 0x4000            # 防止长按重复触发（Vista+）
+    HOTKEY_ID = 1
+
+    def __init__(self, hotkey_str, callback):
+        self._callback = callback
+        self._mods, self._vk = self._parse(hotkey_str)
+        self._pending = None
+        self._thread_id = None
+        self._user32 = ctypes.windll.user32
+        self._configure_signatures()
+        self._ready = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        self._ready.wait(2.0)
+
+    def _configure_signatures(self):
+        """显式声明 Win32 函数签名，避免 64 位下句柄/参数被截断。"""
+        u = self._user32
+        u.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int,
+                                     ctypes.c_uint, ctypes.c_uint]
+        u.RegisterHotKey.restype = wintypes.BOOL
+        u.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+        u.UnregisterHotKey.restype = wintypes.BOOL
+        u.GetMessageW.argtypes = [ctypes.c_void_p, wintypes.HWND,
+                                  wintypes.UINT, wintypes.UINT]
+        u.GetMessageW.restype = ctypes.c_int
+        u.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT,
+                                         wintypes.WPARAM, wintypes.LPARAM]
+        u.PostThreadMessageW.restype = wintypes.BOOL
+
+    @staticmethod
+    def _parse(hotkey_str):
+        """把 'ctrl+win+z' 之类的字符串解析成 (mods, vk)。"""
+        mod_map = {
+            'ctrl': GlobalHotkey.MOD_CONTROL, 'control': GlobalHotkey.MOD_CONTROL,
+            'alt': GlobalHotkey.MOD_ALT, 'shift': GlobalHotkey.MOD_SHIFT,
+            'win': GlobalHotkey.MOD_WIN, 'windows': GlobalHotkey.MOD_WIN,
+            'cmd': GlobalHotkey.MOD_WIN,
+        }
+        mods = 0
+        vk = None
+        for part in (hotkey_str or "").lower().replace(' ', '').split('+'):
+            if not part:
+                continue
+            if part in mod_map:
+                mods |= mod_map[part]
+            else:
+                vk = GlobalHotkey._key_to_vk(part)
+        if vk is None:
+            vk = 0x5A  # 解析失败时退回 Z 键
+        return mods | GlobalHotkey.MOD_NOREPEAT, vk
+
+    @staticmethod
+    def _key_to_vk(key):
+        """把单个按键名转成虚拟键码。"""
+        if len(key) == 1:
+            if 'a' <= key <= 'z':
+                return ord(key.upper())
+            if '0' <= key <= '9':
+                return ord(key)
+        if key.startswith('f') and key[1:].isdigit():
+            n = int(key[1:])
+            if 1 <= n <= 24:
+                return 0x70 + (n - 1)  # VK_F1 = 0x70
+        special = {
+            'space': 0x20, 'enter': 0x0D, 'return': 0x0D, 'tab': 0x09,
+            'esc': 0x1B, 'escape': 0x1B, 'up': 0x26, 'down': 0x28,
+            'left': 0x25, 'right': 0x27, 'home': 0x24, 'end': 0x23,
+            'insert': 0x2D, 'delete': 0x2E, 'pageup': 0x21, 'pagedown': 0x22,
+        }
+        return special.get(key)
+
+    def _run(self):
+        """后台线程：注册热键并跑消息循环。"""
+        u = self._user32
+        self._thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+        if not u.RegisterHotKey(None, self.HOTKEY_ID, self._mods, self._vk):
+            print("全局快捷键注册失败（可能已被其它程序占用）")
+        self._ready.set()
+
+        msg = wintypes.MSG()
+        while True:
+            ret = u.GetMessageW(ctypes.byref(msg), None, 0, 0)
+            if ret in (0, -1):
+                break
+            if msg.message == self.WM_HOTKEY and msg.wParam == self.HOTKEY_ID:
+                try:
+                    self._callback()
+                except Exception as e:
+                    print(f"快捷键回调出错: {e}")
+            elif msg.message == self.WM_APP_REREGISTER:
+                u.UnregisterHotKey(None, self.HOTKEY_ID)
+                if self._pending is not None:
+                    self._mods, self._vk = self._pending
+                    self._pending = None
+                if not u.RegisterHotKey(None, self.HOTKEY_ID, self._mods, self._vk):
+                    print("全局快捷键重新注册失败（可能已被占用）")
+            elif msg.message == self.WM_APP_QUIT:
+                break
+        u.UnregisterHotKey(None, self.HOTKEY_ID)
+
+    def update_hotkey(self, hotkey_str):
+        """运行时切换快捷键。"""
+        self._pending = self._parse(hotkey_str)
+        if self._thread_id:
+            self._user32.PostThreadMessageW(
+                self._thread_id, self.WM_APP_REREGISTER, 0, 0)
+
+    def stop(self):
+        """停止后台线程并注销热键。"""
+        if self._thread_id:
+            self._user32.PostThreadMessageW(
+                self._thread_id, self.WM_APP_QUIT, 0, 0)
 
 
 # ===== 快照管理系统 =====
@@ -445,11 +575,6 @@ class HotkeySettingsDialog(QDialog):
         tip_label = QLabel("支持的修饰键: ctrl, shift, alt, win\n支持的按键: a-z, 0-9, f1-f12等")
         tip_label.setStyleSheet("color: gray; font-size: 10px;")
         layout.addWidget(tip_label)
-
-        if not KEYBOARD_AVAILABLE:
-            warning_label = QLabel("⚠️ 需要安装keyboard库才能使用全局快捷键\n运行: pip install keyboard")
-            warning_label.setStyleSheet("color: red;")
-            layout.addWidget(warning_label)
 
         # 按钮
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -908,6 +1033,9 @@ class ImageComposer(QMainWindow):
         self.hotkey_emitter = HotkeySignalEmitter()
         self.hotkey_emitter.show_signal.connect(self.toggle_window)
 
+        # 全局快捷键对象（使用 Windows 原生 RegisterHotKey）
+        self.global_hotkey = None
+
         # 创建箭头操作的撤销栈
         self.drawing_undo_stack = DrawingUndoStack()
 
@@ -1122,15 +1250,16 @@ class ImageComposer(QMainWindow):
         self.media_player.play()
 
     def setup_global_hotkey(self):
-        """设置全局快捷键"""
-        if not KEYBOARD_AVAILABLE:
-            return
-
+        """设置全局快捷键（Windows 原生 RegisterHotKey）"""
         try:
-            # 移除旧的快捷键
-            keyboard.unhook_all()
-            # 注册新的快捷键 - 使用信号发射器确保线程安全
-            keyboard.add_hotkey(self.hotkey, lambda: self.hotkey_emitter.show_signal.emit())
+            if self.global_hotkey is None:
+                # 首次注册：启动后台热键线程，命中时通过信号切回主线程
+                self.global_hotkey = GlobalHotkey(
+                    self.hotkey,
+                    lambda: self.hotkey_emitter.show_signal.emit())
+            else:
+                # 已存在：运行时切换到新的快捷键
+                self.global_hotkey.update_hotkey(self.hotkey)
         except Exception as e:
             print(f"设置全局快捷键失败: {e}")
 
@@ -1158,8 +1287,8 @@ class ImageComposer(QMainWindow):
 
     def quit_application(self):
         """真正退出程序"""
-        if KEYBOARD_AVAILABLE:
-            keyboard.unhook_all()
+        if self.global_hotkey:
+            self.global_hotkey.stop()
         self.tray_icon.hide()
         QApplication.quit()
 
