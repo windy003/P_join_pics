@@ -1,1 +1,1 @@
-cd /d  "D:\files\using\Python\P_join_pics" && start /B pythonw  "D:\files\using\Python\P_join_pics\image_composer_pyqt.py"
+ start /B "" "D:\files\using\Python\P_join_pics\.venv\Scripts\pythonw.exe"  "D:\files\using\Python\P_join_pics\image_composer_pyqt.py"
