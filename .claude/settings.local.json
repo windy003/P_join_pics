@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
-      "Bash(find /d/files/using/Python/P_join_pics -type f | grep -E \"\\\\.\\(py|txt|md|json|cfg\\)$\")"
+      "Bash(find /d/files/using/Python/P_join_pics -type f | grep -E \"\\\\.\\(py|txt|md|json|cfg\\)$\")",
+      "Bash(.venv/Scripts/python.exe -c ' *)"
     ]
   }
 }

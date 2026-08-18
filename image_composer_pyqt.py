@@ -7,10 +7,11 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphics
                              QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsItemGroup,
                              QGraphicsRectItem, QListWidget, QListWidgetItem, QAbstractItemView,
                              QCheckBox, QGraphicsTextItem, QInputDialog, QTextEdit)
-from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject, QLineF, QTimer, QUrl
+from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QPropertyAnimation, pyqtProperty, QSettings, pyqtSignal, QObject, QLineF, QTimer, QUrl, QBuffer, QIODevice
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QKeySequence, QIcon, QPen, QColor, QPolygonF, QBrush, QFont
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PIL import Image
+from PIL import Image, ImageChops
+import io
 import os
 from datetime import datetime
 from dotenv import load_dotenv
@@ -1177,6 +1178,13 @@ class ImageComposer(QMainWindow):
 
         tray_menu.addSeparator()
 
+        # 重启程序
+        restart_action = QAction("重启程序 (&R)", self)
+        restart_action.triggered.connect(self.restart_application)
+        tray_menu.addAction(restart_action)
+
+        tray_menu.addSeparator()
+
         # 退出程序
         quit_action = QAction("退出程序 (&X)", self)
         quit_action.triggered.connect(self.quit_application)
@@ -1291,6 +1299,13 @@ class ImageComposer(QMainWindow):
             self.global_hotkey.stop()
         self.tray_icon.hide()
         QApplication.quit()
+
+    def restart_application(self):
+        """重启程序（用相同的解释器和参数重新启动进程）"""
+        if self.global_hotkey:
+            self.global_hotkey.stop()
+        self.tray_icon.hide()
+        os.execl(sys.executable, sys.executable, *sys.argv)
 
     def create_toolbar(self):
         """创建工具栏（分两行显示）"""
@@ -2265,6 +2280,23 @@ class ImageComposer(QMainWindow):
         self.view.resetTransform()
         self.view.centerOn(0, 0)
 
+    def _trim_blank_borders(self, image):
+        """裁剪图像四周的纯白空白边缘，使宽高只包含有效像素内容"""
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        image.save(buffer, 'PNG')
+        pil_image = Image.open(io.BytesIO(buffer.data().data())).convert('RGB')
+        buffer.close()
+
+        bg = Image.new('RGB', pil_image.size, (255, 255, 255))
+        diff = ImageChops.difference(pil_image, bg)
+        bbox = diff.getbbox()
+
+        if bbox and bbox != (0, 0, pil_image.width, pil_image.height):
+            x0, y0, x1, y1 = bbox
+            return image.copy(x0, y0, x1 - x0, y1 - y0)
+        return image
+
     def export_image(self):
         """导出合成后的图片（自动保存到指定路径）"""
         all_items = self.scene.items()
@@ -2324,6 +2356,9 @@ class ImageComposer(QMainWindow):
             painter.setRenderHint(QPainter.SmoothPixmapTransform)
             self.scene.render(painter, QRectF(0, 0, display_width, display_height), display_rect)
             painter.end()
+
+            # 裁掉四周的纯白空白边缘，宽高只保留有效像素内容
+            image = self._trim_blank_borders(image)
 
             # 设置最大像素尺寸限制（宽或高不超过 1920 像素）
             MAX_SIZE = 1920
@@ -2463,6 +2498,9 @@ class ImageComposer(QMainWindow):
             painter.setRenderHint(QPainter.SmoothPixmapTransform)
             self.scene.render(painter, QRectF(0, 0, display_width, display_height), display_rect)
             painter.end()
+
+            # 裁掉四周的纯白空白边缘，宽高只保留有效像素内容
+            image = self._trim_blank_borders(image)
 
             # 设置最大像素尺寸限制（宽或高不超过 1920 像素）
             MAX_SIZE = 1920
