@@ -23,6 +23,8 @@ load_dotenv()
 INPUT_DIR = os.getenv('INPUT_DIR', os.path.join(os.path.expanduser("~"), "OneDrive", "图片", "Screenshots"))
 # 从环境变量获取桌面目录，默认为 OneDrive\Desktop
 DESKTOP_DIR = os.getenv('desktop_dir', os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop"))
+# 从环境变量获取ToDo目录，默认为桌面下的ToDo文件夹
+TODO_DIR = os.getenv('ToDo_dir', os.path.join(DESKTOP_DIR, "ToDo"))
 import ctypes
 from ctypes import wintypes
 import threading
@@ -1367,6 +1369,12 @@ class ImageComposer(QMainWindow):
         export_desktop_action.triggered.connect(self.export_to_desktop)
         self.addAction(export_desktop_action)
 
+        # 绑定Ctrl+Shift+T快捷键（保存到.env中设置的ToDo目录）
+        export_todo_action = QAction(self)
+        export_todo_action.setShortcut(QKeySequence("Ctrl+Shift+T"))
+        export_todo_action.triggered.connect(self.export_to_todo)
+        self.addAction(export_todo_action)
+
         self.toolbar1.addSeparator()
 
         # 删除选中
@@ -2579,6 +2587,147 @@ class ImageComposer(QMainWindow):
             # 播放错误提示音
             QApplication.beep()
             self.status_bar.showMessage(f"导出到桌面失败: {str(e)}")
+
+    def export_to_todo(self):
+        """导出合成后的图片到.env中设置的ToDo目录（不删除源文件和画布内容）"""
+        all_items = self.scene.items()
+
+        # 检查是否有图片、箭头、线条或矩形框
+        has_content = any(isinstance(item, (DraggablePixmapItem, ArrowItem, LineItem, RectItem, TextItem)) for item in all_items)
+
+        if not has_content:
+            # 播放错误提示音
+            QApplication.beep()
+            self.status_bar.showMessage("画布上没有内容可导出！")
+            return
+
+        try:
+            # 从环境变量获取ToDo目录
+            todo_path = TODO_DIR
+
+            # 如果目录不存在，创建它
+            os.makedirs(todo_path, exist_ok=True)
+
+            # 生成时间戳文件名（使用 JPEG 格式以减小文件大小）
+            timestamp = datetime.now().strftime("%Y-%m-%d %H %M %S")
+            file_path = os.path.join(todo_path, f"{timestamp}.jpg")
+
+            # 获取当前显示状态的边界框
+            display_rect = self.scene.itemsBoundingRect()
+
+            # 计算原始像素尺寸（临时将所有图片 scale 设为 1.0）
+            saved_scales = {}
+            for item in all_items:
+                if isinstance(item, DraggablePixmapItem):
+                    saved_scales[item] = item.scale()
+                    item.setScale(1.0)
+
+            original_rect = self.scene.itemsBoundingRect()
+
+            # 恢复所有图片的 scale
+            for item, scale in saved_scales.items():
+                item.setScale(scale)
+
+            # 计算缩放因子
+            if original_rect.width() > 0:
+                scale_factor = display_rect.width() / original_rect.width()
+            else:
+                scale_factor = 1.0
+
+            # 使用显示尺寸渲染（保持所有图形位置正确）
+            display_width = int(display_rect.width())
+            display_height = int(display_rect.height())
+
+            # 使用 RGB 格式（JPEG 不支持透明通道）
+            image = QImage(display_width, display_height, QImage.Format_RGB32)
+            image.fill(Qt.white)
+
+            painter = QPainter(image)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            self.scene.render(painter, QRectF(0, 0, display_width, display_height), display_rect)
+            painter.end()
+
+            # 裁掉四周的纯白空白边缘，宽高只保留有效像素内容
+            image = self._trim_blank_borders(image)
+
+            # 设置最大像素尺寸限制（宽或高不超过 1920 像素）
+            MAX_SIZE = 1920
+            current_width = image.width()
+            current_height = image.height()
+
+            # 如果图片超过最大尺寸，按比例缩小
+            if current_width > MAX_SIZE or current_height > MAX_SIZE:
+                if current_width > current_height:
+                    target_width = MAX_SIZE
+                    target_height = int(current_height * MAX_SIZE / current_width)
+                else:
+                    target_height = MAX_SIZE
+                    target_width = int(current_width * MAX_SIZE / current_height)
+                image = image.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+            # 保存为 JPEG 格式，质量 85%
+            image.save(file_path, 'JPEG', 85)
+
+            # 播放 Alt+S 导出提示音
+            self.play_alt_s_sound()
+
+            # 更新状态栏，显示完整路径和实际尺寸
+            final_width = image.width()
+            final_height = image.height()
+
+            # 导出成功后，删除画布中的所有图片和形状，并删除源文件
+            deleted_files = []
+            failed_deletions = []
+            shape_count = 0
+
+            for item in list(all_items):  # 使用list()创建副本，避免在迭代时修改
+                if isinstance(item, DraggablePixmapItem):
+                    # 尝试删除源文件
+                    if item.file_path and os.path.exists(item.file_path):
+                        try:
+                            os.remove(item.file_path)
+                            deleted_files.append(os.path.basename(item.file_path))
+                        except Exception as e:
+                            failed_deletions.append(f"{os.path.basename(item.file_path)}: {str(e)}")
+
+                    # 从场景中删除图片
+                    self.scene.removeItem(item)
+                    self.image_count -= 1
+                elif isinstance(item, (ArrowItem, LineItem, RectItem, TextItem)):
+                    # 删除所有形状（箭头、线条、矩形框）
+                    self.scene.removeItem(item)
+                    shape_count += 1
+
+            # 删除合并前保存的原始文件（pending_delete_files）
+            for pending_file in self.pending_delete_files:
+                if os.path.exists(pending_file):
+                    try:
+                        os.remove(pending_file)
+                        deleted_files.append(os.path.basename(pending_file))
+                    except Exception as e:
+                        failed_deletions.append(f"{os.path.basename(pending_file)}: {str(e)}")
+            self.pending_delete_files.clear()
+
+            # 清空撤销栈和快照（因为所有内容都被删除了）
+            self.drawing_undo_stack.clear()
+            self.snapshot_manager.clear()
+
+            # 更新状态栏消息，包含删除信息
+            status_msg = f"已保存到ToDo: {file_path} ({final_width}x{final_height})"
+            if deleted_files:
+                status_msg += f" | 已删除 {len(deleted_files)} 个源文件"
+            if shape_count > 0:
+                status_msg += f" | 已清除 {shape_count} 个形状"
+            if failed_deletions:
+                status_msg += f" | {len(failed_deletions)} 个文件删除失败"
+
+            self.status_bar.showMessage(status_msg)
+
+        except Exception as e:
+            # 播放错误提示音
+            QApplication.beep()
+            self.status_bar.showMessage(f"导出到ToDo失败: {str(e)}")
 
     def increase_text_font_size(self):
         """放大选中文字的字体"""
