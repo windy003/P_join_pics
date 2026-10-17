@@ -25,6 +25,21 @@ INPUT_DIR = os.getenv('INPUT_DIR', os.path.join(os.path.expanduser("~"), "OneDri
 DESKTOP_DIR = os.getenv('desktop_dir', os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop"))
 # 从环境变量获取ToDo目录，默认为桌面下的ToDo文件夹
 TODO_DIR = os.getenv('ToDo_dir', os.path.join(DESKTOP_DIR, "ToDo"))
+# 导出时最长边的像素上限；0（默认）表示不限制，按合并后的原始分辨率导出
+try:
+    MAX_EXPORT_SIZE = int(os.getenv('MAX_EXPORT_SIZE', '0') or 0)
+except ValueError:
+    MAX_EXPORT_SIZE = 0
+
+# 导出格式（jpg / png）与 JPEG 质量；PNG 为无损导出
+EXPORT_FORMAT = (os.getenv('EXPORT_FORMAT', 'jpg') or 'jpg').strip().lower()
+if EXPORT_FORMAT not in ('jpg', 'jpeg', 'png'):
+    EXPORT_FORMAT = 'jpg'
+EXPORT_EXT = 'png' if EXPORT_FORMAT == 'png' else 'jpg'
+try:
+    JPEG_QUALITY = max(1, min(100, int(os.getenv('JPEG_QUALITY', '95'))))
+except ValueError:
+    JPEG_QUALITY = 95
 import ctypes
 from ctypes import wintypes
 import threading
@@ -2305,6 +2320,37 @@ class ImageComposer(QMainWindow):
             return image.copy(x0, y0, x1 - x0, y1 - y0)
         return image
 
+    def _limit_export_size(self, image):
+        """按 MAX_EXPORT_SIZE 限制导出尺寸；MAX_EXPORT_SIZE 为 0 时保持原始分辨率"""
+        if MAX_EXPORT_SIZE <= 0:
+            return image
+
+        current_width = image.width()
+        current_height = image.height()
+        if current_width <= MAX_EXPORT_SIZE and current_height <= MAX_EXPORT_SIZE:
+            return image
+
+        if current_width > current_height:
+            target_width = MAX_EXPORT_SIZE
+            target_height = int(current_height * MAX_EXPORT_SIZE / current_width)
+        else:
+            target_height = MAX_EXPORT_SIZE
+            target_width = int(current_width * MAX_EXPORT_SIZE / current_height)
+        return image.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+    def _save_export_image(self, image, file_path):
+        """保存导出图；JPEG 使用最高保真编码（4:4:4 无色度抽样），PNG 为无损"""
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        image.save(buffer, 'PNG')  # 先无损转换为 PIL 图片
+        pil_image = Image.open(io.BytesIO(buffer.data().data())).convert('RGB')
+        buffer.close()
+
+        if file_path.lower().endswith('.png'):
+            pil_image.save(file_path, 'PNG', optimize=True)
+        else:
+            pil_image.save(file_path, 'JPEG', quality=JPEG_QUALITY, subsampling=0, optimize=True)
+
     def export_image(self):
         """导出合成后的图片（自动保存到指定路径）"""
         all_items = self.scene.items()
@@ -2325,9 +2371,9 @@ class ImageComposer(QMainWindow):
             # 如果目录不存在，创建它
             os.makedirs(save_dir, exist_ok=True)
 
-            # 生成时间戳文件名（使用 JPEG 格式以减小文件大小）
+            # 生成时间戳文件名（格式由 EXPORT_FORMAT 决定）
             timestamp = datetime.now().strftime("%Y-%m-%d %H %M %S")
-            file_path = os.path.join(save_dir, f"{timestamp}.jpg")
+            file_path = os.path.join(save_dir, f"{timestamp}.{EXPORT_EXT}")
 
             # 获取当前显示状态的边界框
             display_rect = self.scene.itemsBoundingRect()
@@ -2368,23 +2414,11 @@ class ImageComposer(QMainWindow):
             # 裁掉四周的纯白空白边缘，宽高只保留有效像素内容
             image = self._trim_blank_borders(image)
 
-            # 设置最大像素尺寸限制（宽或高不超过 1920 像素）
-            MAX_SIZE = 1920
-            current_width = image.width()
-            current_height = image.height()
+            # 只在配置了 MAX_EXPORT_SIZE 时限制尺寸，默认保持合并后的原始分辨率
+            image = self._limit_export_size(image)
 
-            # 如果图片超过最大尺寸，按比例缩小
-            if current_width > MAX_SIZE or current_height > MAX_SIZE:
-                if current_width > current_height:
-                    target_width = MAX_SIZE
-                    target_height = int(current_height * MAX_SIZE / current_width)
-                else:
-                    target_height = MAX_SIZE
-                    target_width = int(current_width * MAX_SIZE / current_height)
-                image = image.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-            # 保存为 JPEG 格式，质量 85%
-            image.save(file_path, 'JPEG', 85)
+            # 保存为高保真图片
+            self._save_export_image(image, file_path)
 
             # 播放 Alt+S 导出提示音
             self.play_alt_s_sound()
@@ -2467,9 +2501,9 @@ class ImageComposer(QMainWindow):
             # 如果目录不存在，创建它
             os.makedirs(desktop_path, exist_ok=True)
 
-            # 生成时间戳文件名（使用 JPEG 格式以减小文件大小）
+            # 生成时间戳文件名（格式由 EXPORT_FORMAT 决定）
             timestamp = datetime.now().strftime("%Y-%m-%d %H %M %S")
-            file_path = os.path.join(desktop_path, f"{timestamp}.jpg")
+            file_path = os.path.join(desktop_path, f"{timestamp}.{EXPORT_EXT}")
 
             # 获取当前显示状态的边界框
             display_rect = self.scene.itemsBoundingRect()
@@ -2510,23 +2544,11 @@ class ImageComposer(QMainWindow):
             # 裁掉四周的纯白空白边缘，宽高只保留有效像素内容
             image = self._trim_blank_borders(image)
 
-            # 设置最大像素尺寸限制（宽或高不超过 1920 像素）
-            MAX_SIZE = 1920
-            current_width = image.width()
-            current_height = image.height()
+            # 只在配置了 MAX_EXPORT_SIZE 时限制尺寸，默认保持合并后的原始分辨率
+            image = self._limit_export_size(image)
 
-            # 如果图片超过最大尺寸，按比例缩小
-            if current_width > MAX_SIZE or current_height > MAX_SIZE:
-                if current_width > current_height:
-                    target_width = MAX_SIZE
-                    target_height = int(current_height * MAX_SIZE / current_width)
-                else:
-                    target_height = MAX_SIZE
-                    target_width = int(current_width * MAX_SIZE / current_height)
-                image = image.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-            # 保存为 JPEG 格式，质量 85%
-            image.save(file_path, 'JPEG', 85)
+            # 保存为高保真图片
+            self._save_export_image(image, file_path)
 
             # 播放 Alt+S 导出提示音
             self.play_alt_s_sound()
@@ -2608,9 +2630,9 @@ class ImageComposer(QMainWindow):
             # 如果目录不存在，创建它
             os.makedirs(todo_path, exist_ok=True)
 
-            # 生成时间戳文件名（使用 JPEG 格式以减小文件大小）
+            # 生成时间戳文件名（格式由 EXPORT_FORMAT 决定）
             timestamp = datetime.now().strftime("%Y-%m-%d %H %M %S")
-            file_path = os.path.join(todo_path, f"{timestamp}.jpg")
+            file_path = os.path.join(todo_path, f"{timestamp}.{EXPORT_EXT}")
 
             # 获取当前显示状态的边界框
             display_rect = self.scene.itemsBoundingRect()
@@ -2651,23 +2673,11 @@ class ImageComposer(QMainWindow):
             # 裁掉四周的纯白空白边缘，宽高只保留有效像素内容
             image = self._trim_blank_borders(image)
 
-            # 设置最大像素尺寸限制（宽或高不超过 1920 像素）
-            MAX_SIZE = 1920
-            current_width = image.width()
-            current_height = image.height()
+            # 只在配置了 MAX_EXPORT_SIZE 时限制尺寸，默认保持合并后的原始分辨率
+            image = self._limit_export_size(image)
 
-            # 如果图片超过最大尺寸，按比例缩小
-            if current_width > MAX_SIZE or current_height > MAX_SIZE:
-                if current_width > current_height:
-                    target_width = MAX_SIZE
-                    target_height = int(current_height * MAX_SIZE / current_width)
-                else:
-                    target_height = MAX_SIZE
-                    target_width = int(current_width * MAX_SIZE / current_height)
-                image = image.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-            # 保存为 JPEG 格式，质量 85%
-            image.save(file_path, 'JPEG', 85)
+            # 保存为高保真图片
+            self._save_export_image(image, file_path)
 
             # 播放 Alt+S 导出提示音
             self.play_alt_s_sound()
