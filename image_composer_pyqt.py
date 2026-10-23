@@ -864,6 +864,42 @@ class CustomGraphicsView(QGraphicsView):
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
         self.main_window = None
+        # 画线时最近一次鼠标的原始场景坐标（未做正交约束），用于按下/松开 Shift 时刷新预览
+        self._last_line_cursor_pos = None
+
+    @staticmethod
+    def _constrain_to_orthogonal(start_point, end_point):
+        """将终点约束到水平或垂直方向，返回正交后的终点"""
+        dx = end_point.x() - start_point.x()
+        dy = end_point.y() - start_point.y()
+        if abs(dx) >= abs(dy):
+            return QPointF(end_point.x(), start_point.y())
+        return QPointF(start_point.x(), end_point.y())
+
+    def _update_line_preview(self):
+        """根据当前 Shift 状态刷新画线预览"""
+        if not (self.main_window and self.main_window.line_mode):
+            return
+        if not (self.main_window.line_start_point and self.main_window.temp_line):
+            return
+        if self._last_line_cursor_pos is None:
+            return
+        end_point = self._last_line_cursor_pos
+        if QApplication.keyboardModifiers() & Qt.ShiftModifier:
+            end_point = self._constrain_to_orthogonal(
+                self.main_window.line_start_point, end_point)
+        self.main_window.temp_line.setLine(
+            QLineF(self.main_window.line_start_point, end_point))
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Shift:
+            self._update_line_preview()
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key_Shift:
+            self._update_line_preview()
+        super().keyReleaseEvent(event)
 
     def mousePressEvent(self, event):
         if self.main_window and self.main_window.arrow_mode and event.button() == Qt.LeftButton:
@@ -883,6 +919,7 @@ class CustomGraphicsView(QGraphicsView):
             # 画线绘制模式
             scene_pos = self.mapToScene(event.pos())
             self.main_window.line_start_point = scene_pos
+            self._last_line_cursor_pos = scene_pos
 
             # 创建临时线条用于预览
             pen = QPen(QColor(255, 0, 0, 150), 2, Qt.DashLine)
@@ -959,8 +996,12 @@ class CustomGraphicsView(QGraphicsView):
             # 强制保持十字光标
             self.viewport().setCursor(Qt.CrossCursor)
             if self.main_window.line_start_point:
-                # 更新临时细线
+                # 更新临时细线（按住 Shift 时约束为水平/垂直线）
                 scene_pos = self.mapToScene(event.pos())
+                self._last_line_cursor_pos = scene_pos
+                if event.modifiers() & Qt.ShiftModifier:
+                    scene_pos = self._constrain_to_orthogonal(
+                        self.main_window.line_start_point, scene_pos)
                 if self.main_window.temp_line:
                     line = QLineF(self.main_window.line_start_point, scene_pos)
                     self.main_window.temp_line.setLine(line)
@@ -1004,6 +1045,10 @@ class CustomGraphicsView(QGraphicsView):
         elif self.main_window and self.main_window.line_mode and event.button() == Qt.LeftButton:
             if self.main_window.line_start_point:
                 scene_pos = self.mapToScene(event.pos())
+                # 按住 Shift 时终点约束为水平/垂直线
+                if event.modifiers() & Qt.ShiftModifier:
+                    scene_pos = self._constrain_to_orthogonal(
+                        self.main_window.line_start_point, scene_pos)
 
                 # 移除临时线条
                 if self.main_window.temp_line:
@@ -1018,6 +1063,7 @@ class CustomGraphicsView(QGraphicsView):
                     self.main_window.drawing_undo_stack.push_add_item(self.scene(), line)
 
                 self.main_window.line_start_point = None
+                self._last_line_cursor_pos = None
             event.accept()  # 标记事件已处理
         elif self.main_window and self.main_window.rect_mode and event.button() == Qt.LeftButton:
             if self.main_window.rect_start_point:
